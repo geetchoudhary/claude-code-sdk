@@ -2,7 +2,7 @@
   "mcpServers": {
     "approval-server": {
       "command": "python",
-      "args": ["mcp_approval_server_fixed.py"]
+      "args": ["mcp_approval_webhook_server.py"]
     },
     "demo-server": {
       "command": "python", 

@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Code Unified Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #e74c3c;
+        }
+        
+        .status-dot.connected {
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .column {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .section {
+            background: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .section h2 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .badge {
+            background: #3498db;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .badge.warning {
+            background: #ff9800;
+        }
+        
+        /* Approval Styles */
+        .approval-item {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #fafafa;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .approval-item.pending {
+            border-color: #ff9800;
+            background: #fff3e0;
+            animation: highlight 2s ease-in-out infinite;
+        }
+        
+        @keyframes highlight {
+            0%, 100% { background: #fff3e0; }
+            50% { background: #ffe0b2; }
+        }
+        
+        .approval-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .tool-name {
+            font-weight: bold;
+            font-size: 18px;
+            color: #1976d2;
+        }
+        
+        .timestamp {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .display-text {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        /* Session Styles */
+        .new-session-section {
+            background: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .new-session-input {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        
+        .new-session-input textarea {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ecf0f1;
+            border-radius: 5px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 60px;
+        }
+        
+        .session-card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+        
+        .session-header {
+            background: #34495e;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        
+        .session-header:hover {
+            background: #2c3e50;
+        }
+        
+        .session-content {
+            display: none;
+            padding: 20px;
+        }
+        
+        .session-content.expanded {
+            display: block;
+        }
+        
+        .message {
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            background: #f8f9fa;
+        }
+        
+        /* Button Styles */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #229954;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        /* Status Badges */
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .status-badge.completed {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-badge.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-badge.approved {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .status-badge.denied {
+            background: #ffebee;
+            color: #c62828;
+        }
+        
+        .empty-state {
+            text-align: center;
+            color: #999;
+            padding: 40px;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: #333;
+            color: white;
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            animation: slideInRight 0.3s ease-out;
+            z-index: 1000;
+        }
+        
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .notification.success {
+            background: #27ae60;
+        }
+        
+        .notification.warning {
+            background: #ff9800;
+        }
+        
+        .notification.error {
+            background: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 Claude Code Unified Dashboard</h1>
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Disconnected</span>
+            </div>
+        </header>
+        
+        <div class="main-content">
+            <!-- Left Column: Sessions -->
+            <div class="column">
+                <div class="new-session-section">
+                    <h3>🚀 Start New Session</h3>
+                    <div style="margin-bottom: 15px;">
+                        <label for="permissionMode" style="margin-right: 10px;">Permission Mode:</label>
+                        <select id="permissionMode" style="padding: 8px; border: 2px solid #ecf0f1; border-radius: 5px; font-size: 14px;">
+                            <option value="interactive">Interactive (MCP-based)</option>
+                            <option value="acceptEdits" selected>Accept Edits (Auto-approve edits)</option>
+                            <option value="default">Default (Claude Code prompts)</option>
+                            <option value="bypassPermissions">Bypass All (Dangerous!)</option>
+                        </select>
+                    </div>
+                    <div class="new-session-input">
+                        <textarea id="newSessionInput" placeholder="Type your message to start a new conversation..." rows="2"></textarea>
+                        <button class="btn btn-success" onclick="startNewSession()" id="newSessionBtn">Start New Session</button>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h2>💬 Active Sessions</h2>
+                    <div id="sessionsContainer">
+                        <div class="empty-state">No sessions yet. Start a new conversation above!</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Column: Approvals -->
+            <div class="column">
+                <div class="section">
+                    <h2>
+                        🔒 Permission Requests
+                        <span class="badge warning" id="pendingCount" style="display: none;">0</span>
+                    </h2>
+                    <div id="pendingApprovals">
+                        <div class="empty-state">No pending approvals</div>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h2>📋 Approval History</h2>
+                    <div id="approvalHistory">
+                        <div class="empty-state">No approval history</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Configuration
+        const API_URL = 'http://localhost:8001';
+        const webhookUrl = `${window.location.protocol}//${window.location.host}/webhook`;
+        
+        // State
+        let messagesBySession = {};
+        let allMessages = [];
+        let sessionPermissionModes = {};
+        let pendingApprovals = {};
+        let approvalHistory = [];
+        let eventSource = null;
+        
+        // DOM Elements
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const sessionsContainer = document.getElementById('sessionsContainer');
+        const pendingApprovalsDiv = document.getElementById('pendingApprovals');
+        const approvalHistoryDiv = document.getElementById('approvalHistory');
+        const pendingCount = document.getElementById('pendingCount');
+        const newSessionInput = document.getElementById('newSessionInput');
+        const newSessionBtn = document.getElementById('newSessionBtn');
+        
+        // Polling Functions
+        async function pollMessages() {
+            try {
+                const response = await fetch('/messages');
+                if (response.ok) {
+                    const data = await response.json();
+                    const newMessages = data.messages || [];
+                    
+                    // Check if messages have actually changed
+                    if (JSON.stringify(newMessages) !== JSON.stringify(allMessages)) {
+                        // Save current input values and focus
+                        const inputStates = saveAllInputStates();
+                        
+                        allMessages = newMessages;
+                        groupMessagesBySession();
+                        renderSessions();
+                        
+                        // Restore input values and focus
+                        restoreAllInputStates(inputStates);
+                    }
+                    
+                    updateStatus(true);
+                }
+            } catch (error) {
+                console.error('Error polling messages:', error);
+                updateStatus(false);
+            }
+        }
+        
+        async function pollApprovals() {
+            try {
+                const response = await fetch('/approvals');
+                if (response.ok) {
+                    const data = await response.json();
+                    pendingApprovals = data.pending || {};
+                    approvalHistory = data.history || [];
+                    renderApprovals();
+                }
+            } catch (error) {
+                console.error('Error polling approvals:', error);
+            }
+        }
+        
+        function groupMessagesBySession() {
+            messagesBySession = {};
+            
+            allMessages.forEach(msg => {
+                const groupId = msg.conversation_id || msg.session_id || 'no-session';
+                if (!messagesBySession[groupId]) {
+                    messagesBySession[groupId] = [];
+                }
+                messagesBySession[groupId].push(msg);
+            });
+            
+            // Sort messages within each session
+            Object.keys(messagesBySession).forEach(sessionId => {
+                messagesBySession[sessionId].sort((a, b) => 
+                    new Date(a.timestamp) - new Date(b.timestamp)
+                );
+            });
+        }
+        
+        // Render Functions
+        function renderSessions() {
+            if (Object.keys(messagesBySession).length === 0) {
+                sessionsContainer.innerHTML = '<div class="empty-state">No sessions yet. Start a new conversation above!</div>';
+                return;
+            }
+            
+            const sessionIds = Object.keys(messagesBySession).sort((a, b) => {
+                const aTime = new Date(messagesBySession[a][0].timestamp);
+                const bTime = new Date(messagesBySession[b][0].timestamp);
+                return bTime - aTime;
+            });
+            
+            sessionsContainer.innerHTML = sessionIds.map(sessionId => {
+                const messages = messagesBySession[sessionId];
+                const latestMessage = messages[messages.length - 1];
+                const status = latestMessage.status;
+                
+                return `
+                    <div class="session-card" data-session-id="${sessionId}">
+                        <div class="session-header" onclick="toggleSession('${sessionId}')">
+                            <div>
+                                <div style="font-size: 14px; opacity: 0.8;">Session: ${sessionId}</div>
+                                <div style="font-size: 12px; opacity: 0.6;">
+                                    ${messages.length} messages • ${new Date(messages[0].timestamp).toLocaleString()}
+                                </div>
+                            </div>
+                            <div class="status-badge ${status}">${status}</div>
+                        </div>
+                        <div class="session-content" id="content-${sessionId}">
+                            ${messages.map(renderMessage).join('')}
+                            <div style="margin-top: 15px;">
+                                <textarea 
+                                    id="input-${sessionId}" 
+                                    placeholder="Continue this conversation..."
+                                    rows="2"
+                                    style="width: 100%; padding: 10px; border: 2px solid #ecf0f1; border-radius: 5px;"
+                                    onkeydown="handleKeyDown(event, '${sessionId}')"
+                                ></textarea>
+                                <button 
+                                    class="btn btn-primary" 
+                                    style="margin-top: 10px;"
+                                    onclick="sendQueryToSession('${sessionId}')"
+                                >
+                                    Send
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function renderMessage(msg) {
+            const isUserMessage = msg.prompt !== undefined;
+            
+            return `
+                <div class="message">
+                    ${isUserMessage && msg.prompt ? `
+                        <div style="margin-bottom: 10px; padding: 10px; background: #e3f2fd; border-radius: 5px;">
+                            <strong>You:</strong> ${escapeHtml(msg.prompt)}
+                        </div>
+                    ` : ''}
+                    ${msg.result ? `
+                        <div><strong>Claude:</strong> ${escapeHtml(msg.result)}</div>
+                    ` : ''}
+                    ${msg.error ? `
+                        <div style="color: #e74c3c; margin-top: 10px;">${escapeHtml(msg.error)}</div>
+                    ` : ''}
+                    <div style="font-size: 12px; color: #666; margin-top: 10px;">
+                        ${new Date(msg.timestamp).toLocaleString()}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderApprovals() {
+            // Update pending count
+            const pendingItems = Object.entries(pendingApprovals);
+            if (pendingItems.length > 0) {
+                pendingCount.textContent = pendingItems.length;
+                pendingCount.style.display = 'inline-block';
+            } else {
+                pendingCount.style.display = 'none';
+            }
+            
+            // Render pending approvals
+            if (pendingItems.length === 0) {
+                pendingApprovalsDiv.innerHTML = '<div class="empty-state">No pending approvals</div>';
+            } else {
+                pendingApprovalsDiv.innerHTML = pendingItems.map(([id, item]) => `
+                    <div class="approval-item pending">
+                        <div class="approval-header">
+                            <span class="tool-name">${item.tool_name}</span>
+                            <span class="timestamp">${new Date(item.timestamp).toLocaleString()}</span>
+                        </div>
+                        <div class="display-text">${item.display_text || 'No description'}</div>
+                        <div class="buttons">
+                            <button class="btn btn-success" onclick="handleApproval('${id}', 'allow')">
+                                ✅ Approve
+                            </button>
+                            <button class="btn btn-danger" onclick="handleApproval('${id}', 'deny')">
+                                ❌ Deny
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            
+            // Render history
+            if (approvalHistory.length === 0) {
+                approvalHistoryDiv.innerHTML = '<div class="empty-state">No approval history</div>';
+            } else {
+                approvalHistoryDiv.innerHTML = approvalHistory.slice(-10).reverse().map(item => `
+                    <div class="approval-item">
+                        <div class="approval-header">
+                            <span class="tool-name">${item.tool_name}</span>
+                            <span class="timestamp">${new Date(item.timestamp).toLocaleString()}</span>
+                        </div>
+                        <div class="display-text">${item.display_text || 'No description'}</div>
+                        <div style="margin-top: 10px;">
+                            <span class="status-badge ${item.decision === 'allow' ? 'approved' : 'denied'}">
+                                ${item.decision === 'allow' ? 'APPROVED' : 'DENIED'}
+                            </span>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+        
+        // Action Functions
+        async function startNewSession() {
+            const prompt = newSessionInput.value.trim();
+            if (!prompt) {
+                showNotification('Please enter a message', 'error');
+                return;
+            }
+            
+            const permissionMode = document.getElementById('permissionMode').value;
+            const conversationId = `conv-${Date.now()}`;
+            
+            newSessionBtn.disabled = true;
+            newSessionBtn.textContent = 'Starting...';
+            
+            try {
+                const response = await fetch(`${API_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        webhook_url: webhookUrl,
+                        conversation_id: conversationId,
+                        options: { permission_mode: permissionMode }
+                    })
+                });
+                
+                if (response.ok) {
+                    sessionPermissionModes[conversationId] = permissionMode;
+                    newSessionInput.value = '';
+                    showNotification('Session started successfully', 'success');
+                    
+                    setTimeout(() => {
+                        pollMessages();
+                        newSessionBtn.textContent = 'Start New Session';
+                        newSessionBtn.disabled = false;
+                    }, 1000);
+                } else {
+                    throw new Error('Failed to start session');
+                }
+            } catch (error) {
+                showNotification('Failed to start session', 'error');
+                newSessionBtn.textContent = 'Start New Session';
+                newSessionBtn.disabled = false;
+            }
+        }
+        
+        async function sendQueryToSession(conversationId) {
+            const input = document.getElementById(`input-${conversationId}`);
+            const prompt = input.value.trim();
+            
+            if (!prompt) {
+                showNotification('Please enter a message', 'error');
+                return;
+            }
+            
+            const conversationMessages = messagesBySession[conversationId] || [];
+            const latestSessionId = conversationMessages.length > 0 
+                ? conversationMessages[conversationMessages.length - 1].session_id 
+                : null;
+            
+            const permissionMode = sessionPermissionModes[conversationId] || 'acceptEdits';
+            
+            try {
+                const response = await fetch(`${API_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        webhook_url: webhookUrl,
+                        session_id: latestSessionId,
+                        conversation_id: conversationId,
+                        options: { permission_mode: permissionMode }
+                    })
+                });
+                
+                if (response.ok) {
+                    input.value = '';
+                    showNotification('Query sent', 'success');
+                } else {
+                    throw new Error('Failed to send query');
+                }
+            } catch (error) {
+                showNotification('Failed to send query', 'error');
+            }
+        }
+        
+        async function handleApproval(requestId, decision) {
+            try {
+                const response = await fetch(`/approve/${requestId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        decision: decision,
+                        reason: decision === 'deny' ? 'User denied permission' : ''
+                    })
+                });
+                
+                if (response.ok) {
+                    showNotification(
+                        decision === 'allow' ? 'Request approved' : 'Request denied',
+                        decision === 'allow' ? 'success' : 'warning'
+                    );
+                    pollApprovals();
+                }
+            } catch (error) {
+                showNotification('Failed to process approval', 'error');
+            }
+        }
+        
+        // Helper Functions
+        function saveAllInputStates() {
+            const states = {};
+            const focusedElement = document.activeElement;
+            
+            // Save focused element info
+            if (focusedElement && focusedElement.id) {
+                states.focusedElementId = focusedElement.id;
+            }
+            
+            // Save all input values
+            document.querySelectorAll('textarea').forEach(input => {
+                if (input.id) {
+                    states[input.id] = {
+                        value: input.value,
+                        selectionStart: input.selectionStart,
+                        selectionEnd: input.selectionEnd
+                    };
+                }
+            });
+            
+            // Save expanded sessions
+            states.expandedSessions = [];
+            document.querySelectorAll('.session-content.expanded').forEach(content => {
+                const sessionCard = content.closest('.session-card');
+                if (sessionCard) {
+                    const sessionId = sessionCard.getAttribute('data-session-id');
+                    if (sessionId) {
+                        states.expandedSessions.push(sessionId);
+                    }
+                }
+            });
+            
+            return states;
+        }
+        
+        function restoreAllInputStates(states) {
+            if (!states) return;
+            
+            // Restore input values
+            Object.entries(states).forEach(([key, value]) => {
+                if (key !== 'focusedElementId' && key !== 'expandedSessions' && typeof value === 'object') {
+                    const input = document.getElementById(key);
+                    if (input && value) {
+                        input.value = value.value || '';
+                        if (value.selectionStart !== null && value.selectionEnd !== null) {
+                            try {
+                                input.setSelectionRange(value.selectionStart, value.selectionEnd);
+                            } catch (e) {
+                                // Ignore selection range errors
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Restore expanded sessions
+            if (states.expandedSessions) {
+                states.expandedSessions.forEach(sessionId => {
+                    const content = document.getElementById(`content-${sessionId}`);
+                    if (content) {
+                        content.classList.add('expanded');
+                    }
+                });
+            }
+            
+            // Restore focus
+            if (states.focusedElementId) {
+                const elementToFocus = document.getElementById(states.focusedElementId);
+                if (elementToFocus) {
+                    elementToFocus.focus();
+                }
+            }
+        }
+        
+        function toggleSession(sessionId) {
+            const content = document.getElementById(`content-${sessionId}`);
+            if (content) {
+                content.classList.toggle('expanded');
+            }
+        }
+        
+        function handleKeyDown(event, sessionId) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendQueryToSession(sessionId);
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function updateStatus(connected) {
+            statusDot.classList.toggle('connected', connected);
+            statusText.textContent = connected ? 'Connected' : 'Disconnected';
+        }
+        
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+        
+        // SSE Setup
+        function setupSSE() {
+            eventSource = new EventSource('/events');
+            
+            eventSource.onopen = () => {
+                console.log('SSE connection established');
+                updateStatus(true);
+            };
+            
+            eventSource.onerror = (error) => {
+                console.error('SSE error:', error);
+                updateStatus(false);
+                setTimeout(setupSSE, 5000);
+                eventSource.close();
+            };
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    switch (data.type) {
+                        case 'webhook':
+                            // Only poll if not actively typing
+                            if (document.activeElement?.tagName !== 'TEXTAREA') {
+                                pollMessages();
+                            } else {
+                                // Mark that we need to update when done typing
+                                window.pendingMessageUpdate = true;
+                            }
+                            break;
+                        case 'approval_request':
+                            pollApprovals();
+                            showNotification('New approval request received', 'warning');
+                            break;
+                        case 'approval_decision':
+                            pollApprovals();
+                            break;
+                    }
+                } catch (error) {
+                    console.error('Error processing SSE message:', error);
+                }
+            };
+        }
+        
+        // Keyboard shortcut for new session
+        newSessionInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                startNewSession();
+            }
+        });
+        
+        // Update messages when textarea loses focus
+        document.addEventListener('blur', (e) => {
+            if (e.target.tagName === 'TEXTAREA' && window.pendingMessageUpdate) {
+                window.pendingMessageUpdate = false;
+                setTimeout(() => {
+                    pollMessages();
+                }, 100);
+            }
+        }, true);
+        
+        // Initialize
+        pollMessages();
+        pollApprovals();
+        setupSSE();
+        
+        // Periodic polling as backup
+        setInterval(() => {
+            // Only poll if document is visible and not actively typing
+            if (!document.hidden && document.activeElement?.tagName !== 'TEXTAREA') {
+                pollMessages();
+            }
+        }, 5000);
+        
+        setInterval(() => {
+            // Always poll approvals as they're time-sensitive
+            pollApprovals();
+        }, 2000);
+        
+        // Also poll when switching back to tab
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                pollMessages();
+                pollApprovals();
+            }
+        });
+    </script>
+</body>
+</html>

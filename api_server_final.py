@@ -3,6 +3,8 @@ import logging
 from typing import Optional, Dict, Any
 from uuid import uuid4
 from datetime import datetime
+import json
+from pathlib import Path
 
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +29,14 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 PROJECT_ROOT = "/Users/mastergeet/Repos/claude_test"
+
+def get_mcp_config():
+    """Get MCP configuration from mcp-servers.json"""
+    mcp_config_path = Path(__file__).parent / "mcp-servers.json"
+    if mcp_config_path.exists():
+        with open(mcp_config_path) as f:
+            return json.load(f)
+    return None
 
 class QueryRequest(BaseModel):
     prompt: str
@@ -98,14 +108,35 @@ async def process_query(
     logger.info(f"Processing task {task_id} - Prompt: {prompt[:50]}...")
     
     try:
-        # Configure Claude options
-        claude_options = ClaudeCodeOptions(
-            cwd=options.get('cwd', PROJECT_ROOT) if options else PROJECT_ROOT,
-            allowed_tools=options.get('allowed_tools', ["Read", "Write", "LS", "Task"]) if options else ["Read", "Write", "LS", "Task"],
-            permission_mode=options.get('permission_mode', 'acceptEdits') if options else 'acceptEdits',
-            max_turns=options.get('max_turns', 8) if options else 8,
-            resume=session_id  # Resume session if provided
-        )
+        # Get permission mode from options
+        permission_mode = options.get('permission_mode', 'acceptEdits') if options else 'acceptEdits'
+        use_mcp = permission_mode == 'interactive'
+        
+        # Base Claude options
+        claude_options_dict = {
+            'cwd': options.get('cwd', PROJECT_ROOT) if options else PROJECT_ROOT,
+            'allowed_tools': options.get('allowed_tools', ["Read", "Write", "LS", "Task"]) if options else ["Read", "Write", "LS", "Task"],
+            'max_turns': options.get('max_turns', 8) if options else 8,
+            'resume': session_id  # Resume session if provided
+        }
+        
+        # Handle interactive permission mode with MCP
+        if use_mcp:
+            mcp_config = get_mcp_config()
+            if mcp_config:
+                logger.info(f"Task {task_id}: Using MCP interactive permissions")
+                claude_options_dict['permission_mode'] = None  # Let MCP handle permissions
+                claude_options_dict['permission_prompt_tool_name'] = "mcp__approval-server__permissions__approve"
+                claude_options_dict['mcp_servers'] = mcp_config.get("mcpServers", {})
+            else:
+                logger.warning(f"Task {task_id}: MCP config not found, falling back to acceptEdits")
+                claude_options_dict['permission_mode'] = 'acceptEdits'
+        else:
+            # Use standard permission modes
+            claude_options_dict['permission_mode'] = permission_mode
+        
+        # Create Claude options
+        claude_options = ClaudeCodeOptions(**claude_options_dict)
         
         messages = []
         result_session_id = session_id
