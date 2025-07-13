@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Code Session Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #e74c3c;
+        }
+        
+        .status-dot.connected {
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .webhook-url {
+            background: #ecf0f1;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 14px;
+            word-break: break-all;
+            margin-bottom: 10px;
+        }
+        
+        .header-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .new-session-section {
+            background: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .new-session-section h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+        
+        .new-session-input {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        
+        .new-session-input textarea {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ecf0f1;
+            border-radius: 5px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 60px;
+        }
+        
+        .new-session-input textarea:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
+        .sessions-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .session-card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .session-header {
+            background: #34495e;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        
+        .session-header:hover {
+            background: #2c3e50;
+        }
+        
+        .session-id {
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .session-toggle {
+            font-size: 20px;
+            transition: transform 0.3s;
+        }
+        
+        .session-toggle.expanded {
+            transform: rotate(180deg);
+        }
+        
+        .session-content {
+            display: none;
+            padding: 20px;
+        }
+        
+        .session-content.expanded {
+            display: block;
+        }
+        
+        .message {
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            background: #f8f9fa;
+        }
+        
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .task-id {
+            font-family: monospace;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .status-badge.completed {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-badge.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-badge.processing {
+            background: #cce5ff;
+            color: #004085;
+        }
+        
+        .message-content {
+            white-space: pre-wrap;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .timestamp {
+            color: #7f8c8d;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
+        .session-input {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #ecf0f1;
+        }
+        
+        .session-input-container {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        
+        .session-input textarea {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #ecf0f1;
+            border-radius: 5px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 50px;
+        }
+        
+        .session-input textarea:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-primary:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #229954;
+        }
+        
+        .no-sessions {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Claude Code Session Manager</h1>
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Disconnected</span>
+            </div>
+            <div class="webhook-url" id="webhookUrl">Loading...</div>
+            <div class="header-buttons">
+                <button class="btn btn-danger" onclick="clearAllMessages()">Clear All</button>
+                <button class="btn btn-primary" onclick="refreshMessages()">Refresh</button>
+            </div>
+        </header>
+        
+        <div class="new-session-section">
+            <h3>🚀 Start New Session</h3>
+            <div class="new-session-input">
+                <textarea id="newSessionInput" placeholder="Type your message to start a new conversation..." rows="2"></textarea>
+                <button class="btn btn-success" onclick="startNewSession()" id="newSessionBtn">Start New Session</button>
+            </div>
+        </div>
+        
+        <div class="sessions-container" id="sessionsContainer">
+            <div class="no-sessions">No sessions yet. Start a new conversation above!</div>
+        </div>
+    </div>
+    
+    <script>
+        const sessionsContainer = document.getElementById('sessionsContainer');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const webhookUrlElement = document.getElementById('webhookUrl');
+        const newSessionInput = document.getElementById('newSessionInput');
+        const newSessionBtn = document.getElementById('newSessionBtn');
+        
+        // Configuration
+        const webhookUrl = `${window.location.protocol}//${window.location.host}/webhook`;
+        const API_URL = 'http://localhost:8001';
+        
+        webhookUrlElement.textContent = webhookUrl;
+        
+        // Store messages grouped by session
+        let messagesBySession = {};
+        let allMessages = [];
+        
+        // Poll for new messages
+        async function pollMessages() {
+            try {
+                const response = await fetch('/messages');
+                if (response.ok) {
+                    const data = await response.json();
+                    const newMessages = data.messages || [];
+                    
+                    // Check if messages have actually changed
+                    if (JSON.stringify(newMessages) !== JSON.stringify(allMessages)) {
+                        // Save current input values
+                        const inputValues = saveInputValues();
+                        
+                        allMessages = newMessages;
+                        groupMessagesBySession();
+                        renderSessions();
+                        
+                        // Restore input values
+                        restoreInputValues(inputValues);
+                    }
+                    
+                    updateStatus(true);
+                } else {
+                    updateStatus(false);
+                }
+            } catch (error) {
+                console.error('Error polling messages:', error);
+                updateStatus(false);
+            }
+        }
+        
+        function saveInputValues() {
+            const values = {};
+            // Save all session input values
+            document.querySelectorAll('[id^="input-"]').forEach(input => {
+                values[input.id] = {
+                    value: input.value,
+                    selectionStart: input.selectionStart,
+                    selectionEnd: input.selectionEnd
+                };
+            });
+            // Save new session input
+            values['newSessionInput'] = {
+                value: newSessionInput.value,
+                selectionStart: newSessionInput.selectionStart,
+                selectionEnd: newSessionInput.selectionEnd
+            };
+            return values;
+        }
+        
+        function restoreInputValues(values) {
+            Object.entries(values).forEach(([id, data]) => {
+                const input = document.getElementById(id);
+                if (input && data) {
+                    input.value = data.value;
+                    // Restore cursor position
+                    if (data.selectionStart !== null) {
+                        input.setSelectionRange(data.selectionStart, data.selectionEnd);
+                    }
+                }
+            });
+        }
+        
+        function groupMessagesBySession() {
+            messagesBySession = {};
+            
+            allMessages.forEach(msg => {
+                // Use conversation_id for grouping if available, otherwise fall back to session_id
+                const groupId = msg.conversation_id || msg.session_id || 'no-session';
+                if (!messagesBySession[groupId]) {
+                    messagesBySession[groupId] = [];
+                }
+                messagesBySession[groupId].push(msg);
+            });
+            
+            // Sort messages within each session by timestamp
+            Object.keys(messagesBySession).forEach(sessionId => {
+                messagesBySession[sessionId].sort((a, b) => 
+                    new Date(a.timestamp) - new Date(b.timestamp)
+                );
+            });
+        }
+        
+        function updateStatus(connected) {
+            if (connected) {
+                statusDot.classList.add('connected');
+                statusText.textContent = 'Connected';
+            } else {
+                statusDot.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+            }
+        }
+        
+        function renderSessions() {
+            if (Object.keys(messagesBySession).length === 0) {
+                sessionsContainer.innerHTML = '<div class="no-sessions">No sessions yet. Start a new conversation above!</div>';
+                return;
+            }
+            
+            const sessionIds = Object.keys(messagesBySession).sort((a, b) => {
+                const aTime = new Date(messagesBySession[a][0].timestamp);
+                const bTime = new Date(messagesBySession[b][0].timestamp);
+                return bTime - aTime; // Most recent first
+            });
+            
+            sessionsContainer.innerHTML = sessionIds.map(sessionId => {
+                const messages = messagesBySession[sessionId];
+                const isExpanded = sessionId === getExpandedSession();
+                
+                return `
+                    <div class="session-card" data-session-id="${sessionId}">
+                        <div class="session-header" onclick="toggleSession('${sessionId}')">
+                            <div>
+                                <div class="session-id">Session: ${sessionId}</div>
+                                <div style="font-size: 12px; opacity: 0.8;">
+                                    ${messages.length} message${messages.length !== 1 ? 's' : ''} • 
+                                    Started ${new Date(messages[0].timestamp).toLocaleString()}
+                                </div>
+                            </div>
+                            <div class="session-toggle ${isExpanded ? 'expanded' : ''}">▼</div>
+                        </div>
+                        <div class="session-content ${isExpanded ? 'expanded' : ''}">
+                            ${messages.map(msg => renderMessage(msg)).join('')}
+                            
+                            <div class="session-input">
+                                <div class="session-input-container">
+                                    <textarea 
+                                        id="input-${sessionId}" 
+                                        placeholder="Continue this conversation..."
+                                        rows="2"
+                                        onkeydown="handleKeyDown(event, '${sessionId}')"
+                                    ></textarea>
+                                    <button 
+                                        class="btn btn-primary" 
+                                        onclick="sendQueryToSession('${sessionId}')"
+                                        id="btn-${sessionId}"
+                                    >
+                                        Send
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function renderMessage(msg) {
+            const isUserMessage = msg.prompt !== undefined;
+            
+            return `
+                <div class="message">
+                    <div class="message-header">
+                        <div class="task-id">Task: ${msg.task_id}</div>
+                        ${msg.session_id ? `<div class="session-id" style="font-size: 0.8em; color: #666;">Session: ${msg.session_id}</div>` : ''}
+                        <div class="status-badge ${msg.status}">${msg.status}</div>
+                    </div>
+                    ${isUserMessage && msg.prompt ? `
+                        <div style="margin-bottom: 10px; padding: 10px; background: #e3f2fd; border-radius: 5px;">
+                            <strong>You:</strong> ${escapeHtml(msg.prompt)}
+                        </div>
+                    ` : ''}
+                    ${msg.result ? `
+                        <div class="message-content"><strong>Claude:</strong> ${escapeHtml(msg.result)}</div>
+                    ` : ''}
+                    ${msg.error ? `
+                        <div class="error-message">${escapeHtml(msg.error)}</div>
+                    ` : ''}
+                    <div class="timestamp">${new Date(msg.timestamp).toLocaleString()}</div>
+                </div>
+            `;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function toggleSession(sessionId) {
+            const current = getExpandedSession();
+            if (current === sessionId) {
+                localStorage.removeItem('expandedSession');
+            } else {
+                localStorage.setItem('expandedSession', sessionId);
+            }
+            renderSessions();
+        }
+        
+        function getExpandedSession() {
+            return localStorage.getItem('expandedSession');
+        }
+        
+        async function startNewSession() {
+            const prompt = newSessionInput.value.trim();
+            if (!prompt) {
+                alert('Please enter a message');
+                return;
+            }
+            
+            newSessionBtn.disabled = true;
+            newSessionBtn.textContent = 'Starting...';
+            
+            try {
+                const response = await fetch(`${API_URL}/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        webhook_url: webhookUrl,
+                        conversation_id: `conv-${Date.now()}`  // Generate new conversation ID
+                    })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('New session started:', result);
+                    
+                    // Don't add temporary message for new sessions
+                    // We'll wait for the webhook to create the session
+                    
+                    newSessionInput.value = '';
+                    newSessionBtn.textContent = '✓ Started!';
+                    
+                    // Refresh to show new session
+                    setTimeout(() => {
+                        pollMessages();
+                        newSessionBtn.textContent = 'Start New Session';
+                    }, 1000);
+                } else {
+                    throw new Error(`API error: ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error starting session:', error);
+                alert('Failed to start session. Make sure the API server is running.');
+                newSessionBtn.textContent = 'Start New Session';
+            } finally {
+                newSessionBtn.disabled = false;
+            }
+        }
+        
+        async function sendQueryToSession(conversationId) {
+            console.log('Sending query to conversation:', conversationId);
+            const input = document.getElementById(`input-${conversationId}`);
+            const button = document.getElementById(`btn-${conversationId}`);
+            const prompt = input.value.trim();
+            
+            if (!prompt) {
+                alert('Please enter a message');
+                return;
+            }
+            
+            button.disabled = true;
+            button.textContent = 'Sending...';
+            
+            // Get the latest session_id from this conversation's messages
+            const conversationMessages = messagesBySession[conversationId] || [];
+            const latestSessionId = conversationMessages.length > 0 
+                ? conversationMessages[conversationMessages.length - 1].session_id 
+                : null;
+            
+            const payload = {
+                prompt: prompt,
+                webhook_url: webhookUrl,
+                session_id: latestSessionId,  // Use latest Claude session_id for context
+                conversation_id: conversationId  // Keep same conversation_id for grouping
+            };
+            console.log('Sending payload:', payload);
+            
+            try {
+                const response = await fetch(`${API_URL}/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('Query sent to session:', result);
+                    
+                    // Clear input immediately
+                    input.value = '';
+                    button.textContent = '✓ Sent!';
+                    
+                    // Keep the session expanded
+                    localStorage.setItem('expandedSession', conversationId);
+                    
+                    setTimeout(() => {
+                        button.textContent = 'Send';
+                        pollMessages();
+                    }, 1000);
+                } else {
+                    throw new Error(`API error: ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Error sending query:', error);
+                alert('Failed to send query. Make sure the API server is running.');
+                button.textContent = 'Send';
+            } finally {
+                button.disabled = false;
+            }
+        }
+        
+        function handleKeyDown(event, sessionId) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendQueryToSession(sessionId);
+            }
+        }
+        
+        async function clearAllMessages() {
+            if (!confirm('Are you sure you want to clear all sessions?')) {
+                return;
+            }
+            
+            try {
+                await fetch('/messages', { method: 'DELETE' });
+                allMessages = [];
+                messagesBySession = {};
+                renderSessions();
+            } catch (error) {
+                console.error('Error clearing messages:', error);
+            }
+        }
+        
+        function refreshMessages() {
+            pollMessages();
+        }
+        
+        // Allow Enter key for new session
+        newSessionInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                startNewSession();
+            }
+        });
+        
+        // Set up Server-Sent Events for real-time updates
+        function setupSSE() {
+            const eventSource = new EventSource('/events');
+            
+            eventSource.onopen = () => {
+                console.log('SSE connection established');
+                updateStatus(true);
+            };
+            
+            eventSource.onerror = (error) => {
+                console.error('SSE error:', error);
+                updateStatus(false);
+                // Reconnect after 5 seconds
+                setTimeout(setupSSE, 5000);
+                eventSource.close();
+            };
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'connected') {
+                        console.log('SSE connected');
+                        return;
+                    }
+                    
+                    // New webhook message received
+                    console.log('New message via SSE:', data);
+                    
+                    // Save current input values
+                    const inputValues = saveInputValues();
+                    
+                    // Check if this is an update to an existing task
+                    const existingIndex = allMessages.findIndex(msg => msg.task_id === data.task_id);
+                    if (existingIndex !== -1) {
+                        // Update existing message (preserve the prompt if it exists)
+                        const existing = allMessages[existingIndex];
+                        allMessages[existingIndex] = {
+                            ...data,
+                            prompt: existing.prompt || data.prompt
+                        };
+                    } else {
+                        // Add new message
+                        allMessages.push(data);
+                    }
+                    
+                    // Keep only the latest MAX_MESSAGES
+                    if (allMessages.length > 100) {
+                        allMessages = allMessages.slice(-100);
+                    }
+                    
+                    groupMessagesBySession();
+                    renderSessions();
+                    
+                    // Restore input values
+                    restoreInputValues(inputValues);
+                    
+                } catch (error) {
+                    console.error('Error processing SSE message:', error);
+                }
+            };
+        }
+        
+        // Initial load of existing messages
+        pollMessages().then(() => {
+            // Set up SSE after initial load
+            setupSSE();
+        });
+    </script>
+</body>
+</html>
