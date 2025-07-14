@@ -359,6 +359,10 @@
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText">Disconnected</span>
             </div>
+            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                <div>API: <span id="apiUrlDisplay" style="font-family: monospace;"></span></div>
+                <div>Webhook: <span id="webhookUrlDisplay" style="font-family: monospace;"></span></div>
+            </div>
         </header>
         
         <div class="main-content">
@@ -413,8 +417,23 @@
     
     <script>
         // Configuration
-        const API_URL = 'http://localhost:8001';
+        // Auto-detect API URL based on current host
+        function getApiUrl() {
+            // Check if we're on ngrok
+            if (window.location.hostname.includes('ngrok')) {
+                // When on ngrok, use local network IP
+                return 'http://192.168.29.186:8001';
+            }
+            // Default for local development
+            return 'http://localhost:8001';
+        }
+        
+        const API_URL = getApiUrl();
         const webhookUrl = `${window.location.protocol}//${window.location.host}/webhook`;
+        
+        // Log the configuration
+        console.log('API URL:', API_URL);
+        console.log('Webhook URL:', webhookUrl);
         
         // State
         let messagesBySession = {};
@@ -663,10 +682,13 @@
                         newSessionBtn.disabled = false;
                     }, 1000);
                 } else {
-                    throw new Error('Failed to start session');
+                    const errorText = await response.text();
+                    console.error('API Error:', response.status, errorText);
+                    throw new Error(`API Error ${response.status}: ${errorText}`);
                 }
             } catch (error) {
-                showNotification('Failed to start session', 'error');
+                console.error('Failed to start session:', error);
+                showNotification(`Failed: ${error.message}`, 'error');
                 newSessionBtn.textContent = 'Start New Session';
                 newSessionBtn.disabled = false;
             }
@@ -909,6 +931,10 @@
         }, true);
         
         // Initialize
+        // Display configuration
+        document.getElementById('apiUrlDisplay').textContent = API_URL;
+        document.getElementById('webhookUrlDisplay').textContent = webhookUrl;
+        
         pollMessages();
         pollApprovals();
         setupSSE();

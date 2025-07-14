@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Unified Webhook Frontend Server
+Unified Webhook Frontend Server with API Proxy
 Receives webhooks and approval requests, displays them in a web interface
 """
 
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,7 @@ from pathlib import Path
 import json
 import aiohttp
 import uuid
+import httpx
 
 app = FastAPI(title="Claude Code Unified Frontend")
 
@@ -45,16 +46,70 @@ sse_clients_lock = asyncio.Lock()
 MAX_MESSAGES = 100
 MAX_APPROVAL_HISTORY = 100
 
+# API server URL
+API_SERVER_URL = "http://localhost:8001"
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend():
     """Serve the frontend HTML"""
     frontend_path = Path(__file__).parent / "frontend_unified.html"
     if frontend_path.exists():
         with open(frontend_path, 'r') as f:
-            return HTMLResponse(content=f.read())
+            content = f.read()
+            # Replace API_URL with proxy endpoint
+            content = content.replace(
+                "return 'http://192.168.29.186:8001';", 
+                "return '/api';"
+            )
+            content = content.replace(
+                "return 'http://localhost:8001';", 
+                "return '/api';"
+            )
+            return HTMLResponse(content=content)
     else:
         # Return default HTML if file not found
         return HTMLResponse(content=get_default_html())
+
+@app.post("/api/query")
+async def proxy_query(request: Request):
+    """Proxy query requests to the API server"""
+    try:
+        body = await request.json()
+        
+        # Make request to actual API server
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{API_SERVER_URL}/query",
+                json=body,
+                timeout=30.0
+            )
+            
+            return JSONResponse(
+                content=response.json(),
+                status_code=response.status_code
+            )
+    except Exception as e:
+        print(f"Proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/health")
+async def proxy_health():
+    """Proxy health check to the API server"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{API_SERVER_URL}/health",
+                timeout=5.0
+            )
+            return JSONResponse(
+                content=response.json(),
+                status_code=response.status_code
+            )
+    except Exception as e:
+        return JSONResponse(
+            content={"status": "error", "detail": str(e)},
+            status_code=503
+        )
 
 @app.post("/webhook")
 async def receive_webhook(request: Request):
@@ -287,6 +342,7 @@ def get_default_html():
             <li>POST /approval-request - Receive MCP approval requests</li>
             <li>GET /messages - Get webhook messages</li>
             <li>GET /approvals - Get pending approvals</li>
+            <li>POST /api/query - Proxy to API server</li>
         </ul>
     </div>
 </body>
@@ -294,10 +350,11 @@ def get_default_html():
     """
 
 if __name__ == "__main__":
-    print("🚀 Claude Code Unified Frontend Server")
+    print("🚀 Claude Code Unified Frontend Server with API Proxy")
     print("📍 Frontend: http://localhost:8002")
     print("🔗 Webhook endpoint: http://localhost:8002/webhook")
     print("🔒 Approval endpoint: http://localhost:8002/approval-request")
-    print("\nThis server handles both Claude webhooks and MCP approvals!")
+    print("🔄 API Proxy: http://localhost:8002/api/*")
+    print("\nThis server handles Claude webhooks, MCP approvals, and proxies API requests!")
     
     uvicorn.run(app, host="0.0.0.0", port=8002)
