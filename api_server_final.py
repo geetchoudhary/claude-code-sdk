@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-PROJECT_ROOT = "/Users/mastergeet/Repos/claude_test"
+PROJECT_ROOT = "/home/ubuntu/projects"
 
 def get_mcp_config():
     """Get MCP configuration from mcp-servers.json"""
