@@ -17,6 +17,11 @@ import json
 import aiohttp
 import uuid
 import httpx
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI(title="Claude Code Unified Frontend")
 
@@ -47,7 +52,7 @@ MAX_MESSAGES = 100
 MAX_APPROVAL_HISTORY = 100
 
 # API server URL
-API_SERVER_URL = "http://localhost:8001"
+API_SERVER_URL = os.environ.get("API_SERVER_URL", "http://localhost:8001")
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend():
