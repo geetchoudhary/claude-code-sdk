@@ -1,8 +1,12 @@
 {
   "mcpServers": {
     "approval-server": {
-      "command": "python",
-      "args": ["mcp_approval_webhook_server.py"]
+      "command": "/home/ubuntu/claude-code-sdk/venv/bin/python",
+      "args": ["/home/ubuntu/claude-code-sdk/mcp_approval_webhook_server.py"]
+    },
+    "context-manager": {
+      "command": "npx",
+      "args": ["mcp-context-manager"]
     }
   }
 }

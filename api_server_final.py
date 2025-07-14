@@ -128,6 +128,8 @@ async def process_query(
                 claude_options_dict['permission_mode'] = None  # Let MCP handle permissions
                 claude_options_dict['permission_prompt_tool_name'] = "mcp__approval-server__permissions__approve"
                 claude_options_dict['mcp_servers'] = mcp_config.get("mcpServers", {})
+                # Add context-manager tool when using MCP
+                claude_options_dict['allowed_tools'].append("mcp__context-manager")
             else:
                 logger.warning(f"Task {task_id}: MCP config not found, falling back to acceptEdits")
                 claude_options_dict['permission_mode'] = 'acceptEdits'
