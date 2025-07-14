@@ -9,3 +9,4 @@ aiohttp==3.9.5
 requests==2.32.4
 mcp==1.11.0
 fastmcp
+python-dotenv==1.0.0

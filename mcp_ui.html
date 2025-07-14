@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Client Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
+            height: calc(100vh - 200px);
+        }
+
+        .sidebar {
+            background: #1a1a2e;
+            border-radius: 15px;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .main-content {
+            background: #1a1a2e;
+            border-radius: 15px;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .section {
+            margin-bottom: 25px;
+        }
+
+        .section-title {
+            font-size: 1.2rem;
+            color: #667eea;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #b0b0b0;
+            font-size: 0.9rem;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.secondary {
+            background: #2a2a3e;
+        }
+
+        button.danger {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .session-item {
+            background: #0a0a0a;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+
+        .session-item:hover {
+            border-color: #667eea;
+            transform: translateX(5px);
+        }
+
+        .session-item.active {
+            background: #16213e;
+            border-color: #667eea;
+        }
+
+        .session-name {
+            font-weight: 500;
+            color: #e0e0e0;
+            margin-bottom: 5px;
+        }
+
+        .session-info {
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            color: #667eea;
+        }
+
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .tool-item, .resource-item, .prompt-item {
+            background: #0a0a0a;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #333;
+            transition: all 0.3s ease;
+        }
+
+        .tool-item:hover, .resource-item:hover, .prompt-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+        }
+
+        .tool-name, .resource-name, .prompt-name {
+            font-weight: 500;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .tool-description, .resource-description, .prompt-description {
+            color: #b0b0b0;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+
+        .result-box {
+            background: #0a0a0a;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            border: 1px solid #333;
+            white-space: pre-wrap;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-connected {
+            background: #4ade80;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
+        }
+
+        .status-disconnected {
+            background: #f87171;
+            box-shadow: 0 0 10px rgba(248, 113, 113, 0.5);
+        }
+
+        .loading {
+            display: none;
+            color: #667eea;
+            font-size: 0.9rem;
+            margin-top: 10px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            border: 2px solid #667eea;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .args-input {
+            margin-top: 10px;
+        }
+
+        .json-input {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .quick-connect {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .quick-connect button {
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+
+        .error {
+            color: #f87171;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .success {
+            color: #4ade80;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>MCP Client Manager</h1>
+            <p>Connect to and interact with Model Context Protocol servers</p>
+        </div>
+
+        <div class="grid">
+            <div class="sidebar">
+                <div class="section">
+                    <h3 class="section-title">Quick Connect</h3>
+                    <div class="quick-connect">
+                        <button onclick="quickConnect('filesystem')" class="secondary">
+                            <span>📁</span> Filesystem
+                        </button>
+                        <button onclick="quickConnect('github')" class="secondary">
+                            <span>🐙</span> GitHub
+                        </button>
+                        <button onclick="quickConnect('sqlite')" class="secondary">
+                            <span>🗄️</span> SQLite
+                        </button>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3 class="section-title">New Connection</h3>
+                    <form id="connectForm">
+                        <div class="form-group">
+                            <label for="sessionId">Session ID</label>
+                            <input type="text" id="sessionId" placeholder="my-session" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="command">Command</label>
+                            <input type="text" id="command" placeholder="npx" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="args">Arguments (JSON array)</label>
+                            <textarea id="args" placeholder='["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]' class="json-input"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="env">Environment Variables (JSON object)</label>
+                            <textarea id="env" placeholder='{"API_KEY": "your-key"}' class="json-input"></textarea>
+                        </div>
+                        <button type="submit">
+                            <span>🔌</span> Connect
+                        </button>
+                    </form>
+                    <div id="connectStatus" class="loading"></div>
+                </div>
+
+                <div class="section">
+                    <h3 class="section-title">
+                        Active Sessions
+                        <button onclick="refreshSessions()" class="secondary" style="padding: 5px 10px; font-size: 12px;">
+                            🔄 Refresh
+                        </button>
+                    </h3>
+                    <div id="sessionsList">
+                        <div class="empty-state">No active sessions</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="main-content">
+                <div id="noSessionSelected" class="empty-state">
+                    <h2>Welcome to MCP Client Manager</h2>
+                    <p>Select a session from the sidebar or create a new connection to get started.</p>
+                </div>
+
+                <div id="sessionDetails" style="display: none;">
+                    <h2 id="currentSessionName"></h2>
+                    
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('tools')">🛠️ Tools</button>
+                        <button class="tab" onclick="switchTab('resources')">📚 Resources</button>
+                        <button class="tab" onclick="switchTab('prompts')">💬 Prompts</button>
+                    </div>
+
+                    <div id="toolsTab" class="tab-content active">
+                        <div class="section">
+                            <h3 class="section-title">
+                                Available Tools
+                                <button onclick="refreshTools()" class="secondary" style="padding: 5px 10px; font-size: 12px;">
+                                    🔄 Refresh
+                                </button>
+                            </h3>
+                            <div id="toolsList"></div>
+                        </div>
+                    </div>
+
+                    <div id="resourcesTab" class="tab-content">
+                        <div class="section">
+                            <h3 class="section-title">
+                                Available Resources
+                                <button onclick="refreshResources()" class="secondary" style="padding: 5px 10px; font-size: 12px;">
+                                    🔄 Refresh
+                                </button>
+                            </h3>
+                            <div id="resourcesList"></div>
+                        </div>
+                    </div>
+
+                    <div id="promptsTab" class="tab-content">
+                        <div class="section">
+                            <h3 class="section-title">
+                                Available Prompts
+                                <button onclick="refreshPrompts()" class="secondary" style="padding: 5px 10px; font-size: 12px;">
+                                    🔄 Refresh
+                                </button>
+                            </h3>
+                            <div id="promptsList"></div>
+                        </div>
+                    </div>
+
+                    <div id="resultSection" style="display: none;">
+                        <h3 class="section-title">Result</h3>
+                        <div id="resultBox" class="result-box"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let currentSession = null;
+        let sessions = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshSessions();
+            document.getElementById('connectForm').addEventListener('submit', handleConnect);
+        });
+
+        // Quick connect templates
+        function quickConnect(type) {
+            const templates = {
+                filesystem: {
+                    sessionId: 'filesystem-' + Date.now(),
+                    command: 'npx',
+                    args: '["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]',
+                    env: '{}'
+                },
+                github: {
+                    sessionId: 'github-' + Date.now(),
+                    command: 'npx',
+                    args: '["-y", "@modelcontextprotocol/server-github"]',
+                    env: '{"GITHUB_PERSONAL_ACCESS_TOKEN": "your-token-here"}'
+                },
+                sqlite: {
+                    sessionId: 'sqlite-' + Date.now(),
+                    command: 'npx',
+                    args: '["-y", "@modelcontextprotocol/server-sqlite", "path/to/database.db"]',
+                    env: '{}'
+                }
+            };
+
+            const template = templates[type];
+            if (template) {
+                document.getElementById('sessionId').value = template.sessionId;
+                document.getElementById('command').value = template.command;
+                document.getElementById('args').value = template.args;
+                document.getElementById('env').value = template.env;
+            }
+        }
+
+        // Connect to server
+        async function handleConnect(e) {
+            e.preventDefault();
+            
+            const sessionId = document.getElementById('sessionId').value;
+            const command = document.getElementById('command').value;
+            const argsText = document.getElementById('args').value;
+            const envText = document.getElementById('env').value;
+
+            let args = [];
+            let env = null;
+
+            try {
+                if (argsText) args = JSON.parse(argsText);
+                if (envText) env = JSON.parse(envText);
+            } catch (err) {
+                showStatus('connectStatus', 'Invalid JSON format', 'error');
+                return;
+            }
+
+            showStatus('connectStatus', 'Connecting...', 'loading');
+
+            try {
+                const response = await fetch(`${API_BASE}/connect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        server_config: { command, args, env }
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Connection failed');
+                }
+
+                const data = await response.json();
+                showStatus('connectStatus', 'Connected successfully!', 'success');
+                
+                // Clear form
+                document.getElementById('connectForm').reset();
+                
+                // Refresh sessions
+                await refreshSessions();
+                
+                // Select the new session
+                selectSession(sessionId);
+                
+            } catch (err) {
+                showStatus('connectStatus', err.message, 'error');
+            }
+        }
+
+        // Refresh sessions list
+        async function refreshSessions() {
+            try {
+                const response = await fetch(`${API_BASE}/sessions`);
+                const data = await response.json();
+                sessions = data.sessions;
+                
+                const sessionsList = document.getElementById('sessionsList');
+                
+                if (sessions.length === 0) {
+                    sessionsList.innerHTML = '<div class="empty-state">No active sessions</div>';
+                } else {
+                    sessionsList.innerHTML = sessions.map(session => `
+                        <div class="session-item ${currentSession === session.session_id ? 'active' : ''}" 
+                             onclick="selectSession('${session.session_id}')">
+                            <span class="status-indicator status-connected"></span>
+                            <div>
+                                <div class="session-name">${session.session_id}</div>
+                                <div class="session-info">
+                                    Server: ${session.server_name} v${session.server_version}
+                                </div>
+                            </div>
+                            <button onclick="disconnectSession('${session.session_id}', event)" 
+                                    class="danger" style="float: right; padding: 5px 10px; font-size: 12px;">
+                                Disconnect
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Failed to refresh sessions:', err);
+            }
+        }
+
+        // Select a session
+        function selectSession(sessionId) {
+            currentSession = sessionId;
+            
+            // Update UI
+            document.getElementById('noSessionSelected').style.display = 'none';
+            document.getElementById('sessionDetails').style.display = 'block';
+            document.getElementById('currentSessionName').textContent = sessionId;
+            
+            // Refresh data for the selected session
+            refreshTools();
+            refreshResources();
+            refreshPrompts();
+            
+            // Update session list UI
+            refreshSessions();
+        }
+
+        // Disconnect session
+        async function disconnectSession(sessionId, event) {
+            event.stopPropagation();
+            
+            if (!confirm(`Disconnect session "${sessionId}"?`)) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/disconnect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+                
+                if (response.ok) {
+                    if (currentSession === sessionId) {
+                        currentSession = null;
+                        document.getElementById('noSessionSelected').style.display = 'block';
+                        document.getElementById('sessionDetails').style.display = 'none';
+                    }
+                    await refreshSessions();
+                }
+            } catch (err) {
+                console.error('Failed to disconnect:', err);
+            }
+        }
+
+        // Switch tabs
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`${tabName}Tab`).classList.add('active');
+        }
+
+        // Refresh tools
+        async function refreshTools() {
+            if (!currentSession) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/list-tools`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: currentSession })
+                });
+                
+                const data = await response.json();
+                const toolsList = document.getElementById('toolsList');
+                
+                if (data.tools.length === 0) {
+                    toolsList.innerHTML = '<div class="empty-state">No tools available</div>';
+                } else {
+                    toolsList.innerHTML = data.tools.map(tool => `
+                        <div class="tool-item">
+                            <div class="tool-name">${tool.name}</div>
+                            <div class="tool-description">${tool.description || 'No description'}</div>
+                            <div class="args-input">
+                                <label>Arguments (JSON):</label>
+                                <textarea id="args-${tool.name}" class="json-input" 
+                                          placeholder='${JSON.stringify(tool.input_schema?.properties || {}, null, 2)}'></textarea>
+                            </div>
+                            <button onclick="callTool('${tool.name}')" style="margin-top: 10px;">
+                                ▶️ Call Tool
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Failed to refresh tools:', err);
+            }
+        }
+
+        // Call tool
+        async function callTool(toolName) {
+            if (!currentSession) return;
+            
+            const argsTextarea = document.getElementById(`args-${toolName}`);
+            let args = {};
+            
+            try {
+                if (argsTextarea.value) {
+                    args = JSON.parse(argsTextarea.value);
+                }
+            } catch (err) {
+                alert('Invalid JSON in arguments');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/call-tool`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: currentSession,
+                        tool_name: toolName,
+                        arguments: args
+                    })
+                });
+                
+                const data = await response.json();
+                showResult(data);
+            } catch (err) {
+                console.error('Failed to call tool:', err);
+                showResult({ error: err.message });
+            }
+        }
+
+        // Refresh resources
+        async function refreshResources() {
+            if (!currentSession) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/list-resources`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: currentSession })
+                });
+                
+                const data = await response.json();
+                const resourcesList = document.getElementById('resourcesList');
+                
+                if (data.resources.length === 0) {
+                    resourcesList.innerHTML = '<div class="empty-state">No resources available</div>';
+                } else {
+                    resourcesList.innerHTML = data.resources.map(resource => `
+                        <div class="resource-item">
+                            <div class="resource-name">${resource.name}</div>
+                            <div class="resource-description">${resource.description || resource.uri}</div>
+                            <div style="color: #666; font-size: 0.85rem; margin-top: 5px;">
+                                URI: ${resource.uri} | Type: ${resource.mime_type || 'unknown'}
+                            </div>
+                            <button onclick="readResource('${resource.uri}')" style="margin-top: 10px;">
+                                📖 Read Resource
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Failed to refresh resources:', err);
+            }
+        }
+
+        // Read resource
+        async function readResource(uri) {
+            if (!currentSession) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/read-resource`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: currentSession,
+                        uri: uri
+                    })
+                });
+                
+                const data = await response.json();
+                showResult(data);
+            } catch (err) {
+                console.error('Failed to read resource:', err);
+                showResult({ error: err.message });
+            }
+        }
+
+        // Refresh prompts
+        async function refreshPrompts() {
+            if (!currentSession) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/list-prompts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: currentSession })
+                });
+                
+                const data = await response.json();
+                const promptsList = document.getElementById('promptsList');
+                
+                if (data.prompts.length === 0) {
+                    promptsList.innerHTML = '<div class="empty-state">No prompts available</div>';
+                } else {
+                    promptsList.innerHTML = data.prompts.map(prompt => `
+                        <div class="prompt-item">
+                            <div class="prompt-name">${prompt.name}</div>
+                            <div class="prompt-description">${prompt.description || 'No description'}</div>
+                            <div class="args-input">
+                                <label>Arguments (JSON):</label>
+                                <textarea id="prompt-args-${prompt.name}" class="json-input" 
+                                          placeholder='${JSON.stringify(prompt.arguments || {}, null, 2)}'></textarea>
+                            </div>
+                            <button onclick="getPrompt('${prompt.name}')" style="margin-top: 10px;">
+                                💬 Get Prompt
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Failed to refresh prompts:', err);
+            }
+        }
+
+        // Get prompt
+        async function getPrompt(promptName) {
+            if (!currentSession) return;
+            
+            const argsTextarea = document.getElementById(`prompt-args-${promptName}`);
+            let args = {};
+            
+            try {
+                if (argsTextarea.value) {
+                    args = JSON.parse(argsTextarea.value);
+                }
+            } catch (err) {
+                alert('Invalid JSON in arguments');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/get-prompt`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: currentSession,
+                        name: promptName,
+                        arguments: args
+                    })
+                });
+                
+                const data = await response.json();
+                showResult(data);
+            } catch (err) {
+                console.error('Failed to get prompt:', err);
+                showResult({ error: err.message });
+            }
+        }
+
+        // Show result
+        function showResult(data) {
+            document.getElementById('resultSection').style.display = 'block';
+            document.getElementById('resultBox').textContent = JSON.stringify(data, null, 2);
+            
+            // Scroll to result
+            document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Show status message
+        function showStatus(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.className = type === 'loading' ? 'loading show' : type;
+            
+            if (type === 'loading') {
+                element.innerHTML = `<span class="spinner"></span> ${message}`;
+            } else {
+                element.textContent = message;
+            }
+            
+            if (type !== 'loading') {
+                setTimeout(() => {
+                    element.textContent = '';
+                    element.className = '';
+                }, 5000);
+            }
+        }
+    </script>
+</body>
+</html>
