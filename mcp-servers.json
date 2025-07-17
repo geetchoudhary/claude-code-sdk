@@ -1,12 +1,46 @@
 {
   "mcpServers": {
     "approval-server": {
-      "command": "/home/ubuntu/claude-code-sdk/venv/bin/python",
-      "args": ["/home/ubuntu/claude-code-sdk/mcp_approval_webhook_server.py"]
+      "command": "python",
+      "args": [
+        "mcp_approval_webhook_server.py"
+      ]
     },
     "context-manager": {
       "command": "npx",
-      "args": ["mcp-context-manager"]
+      "args": [
+        "mcp-context-manager"
+      ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ]
+    },
+    "figma": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "figma-developer-mcp",
+        "--figma-api-key=YOUR_FIGMA_API_KEY",
+        "--stdio"
+      ]
+    },
+    "github": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+      }
     }
   }
 }

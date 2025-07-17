@@ -75,6 +75,73 @@ async def serve_frontend():
         # Return default HTML if file not found
         return HTMLResponse(content=get_default_html())
 
+@app.get("/api/mcp/{path:path}")
+async def proxy_mcp_get(path: str, request: Request):
+    """Proxy MCP GET requests to the API server"""
+    try:
+        async with httpx.AsyncClient() as client:
+            # Forward the request to the API server
+            response = await client.get(
+                f"{API_SERVER_URL}/mcp/{path}",
+                params=dict(request.query_params),
+                headers=dict(request.headers)
+            )
+            
+            return JSONResponse(
+                content=response.json(),
+                status_code=response.status_code
+            )
+    except Exception as e:
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500
+        )
+
+@app.post("/api/mcp/{path:path}")
+async def proxy_mcp_post(path: str, request: Request):
+    """Proxy MCP POST requests to the API server"""
+    try:
+        body = await request.json() if await request.body() else None
+        
+        async with httpx.AsyncClient() as client:
+            # Forward the request to the API server
+            response = await client.post(
+                f"{API_SERVER_URL}/mcp/{path}",
+                json=body,
+                headers=dict(request.headers)
+            )
+            
+            return JSONResponse(
+                content=response.json(),
+                status_code=response.status_code
+            )
+    except Exception as e:
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500
+        )
+
+@app.delete("/api/mcp/{path:path}")
+async def proxy_mcp_delete(path: str, request: Request):
+    """Proxy MCP DELETE requests to the API server"""
+    try:
+        async with httpx.AsyncClient() as client:
+            # Forward the request to the API server
+            response = await client.delete(
+                f"{API_SERVER_URL}/mcp/{path}",
+                headers=dict(request.headers)
+            )
+            
+            return JSONResponse(
+                content=response.json(),
+                status_code=response.status_code
+            )
+    except Exception as e:
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500
+        )
+
 @app.post("/api/query")
 async def proxy_query(request: Request):
     """Proxy query requests to the API server"""
@@ -116,6 +183,27 @@ async def proxy_health():
             status_code=503
         )
 
+@app.post("/api/init-project")
+async def proxy_init_project(request: Request):
+    """Proxy init-project requests to the API server"""
+    try:
+        body = await request.json()
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{API_SERVER_URL}/init-project",
+                json=body,
+                timeout=300.0  # 5 minutes timeout for project initialization
+            )
+            
+            return JSONResponse(
+                content=response.json(),
+                status_code=response.status_code
+            )
+    except Exception as e:
+        print(f"Proxy error for init-project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/webhook")
 async def receive_webhook(request: Request):
     """Receive webhook from Claude Code API"""
@@ -126,9 +214,46 @@ async def receive_webhook(request: Request):
         if 'received_at' not in payload:
             payload['received_at'] = datetime.utcnow().isoformat()
         
-        # Store message
+        # Store message based on status
         async with messages_lock:
-            messages.append(payload)
+            status = payload.get('status')
+            
+            if status == "user_message":
+                # User message - store as new message
+                payload['message_type'] = 'user'
+                messages.append(payload)
+            elif status == "processing":
+                # Intermediate message chunk - find existing message or create new one
+                task_id = payload.get('task_id')
+                conversation_id = payload.get('conversation_id')
+                
+                # Find existing processing message for this task/conversation
+                processing_message = None
+                for msg in reversed(messages):
+                    if (msg.get('task_id') == task_id and 
+                        msg.get('conversation_id') == conversation_id and 
+                        msg.get('status') == 'processing'):
+                        processing_message = msg
+                        break
+                
+                if processing_message:
+                    # Append to existing processing message
+                    processing_message['result'] = (processing_message.get('result', '') + 
+                                                   payload.get('result', ''))
+                    processing_message['timestamp'] = payload.get('timestamp')
+                else:
+                    # Create new processing message
+                    payload['message_type'] = 'claude_processing'
+                    messages.append(payload)
+            elif status == "completed":
+                # Final message - mark as completed
+                payload['message_type'] = 'claude_completed'
+                messages.append(payload)
+            else:
+                # Other statuses (failed, etc.)
+                payload['message_type'] = 'system'
+                messages.append(payload)
+            
             # Keep only the latest messages
             if len(messages) > MAX_MESSAGES:
                 messages.pop(0)
