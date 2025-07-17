@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "source venv/bin/activate && python3 hooks/pre_tool_use_webhook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "source venv/bin/activate && python3 hooks/post_tool_use_webhook.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "source venv/bin/activate && python3 hooks/auto_commit.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

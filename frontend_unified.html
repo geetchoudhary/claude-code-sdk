@@ -372,6 +372,11 @@
             animation: slideInFromRight 0.3s ease-out;
         }
         
+        .hook-event {
+            animation: slideInFromRight 0.3s ease-out;
+            opacity: 0.9;
+        }
+        
         @keyframes slideInFromLeft {
             from {
                 opacity: 0;
@@ -644,15 +649,35 @@
         function groupMessagesBySession() {
             messagesBySession = {};
             
+            // First, create a mapping of session_id to conversation_id for hook events
+            const sessionToConversationMap = {};
+            
+            // Build the mapping by finding conversations and their associated sessions
             allMessages.forEach(msg => {
-                const groupId = msg.conversation_id || msg.session_id || 'no-session';
+                if (msg.conversation_id && msg.session_id) {
+                    sessionToConversationMap[msg.session_id] = msg.conversation_id;
+                }
+            });
+            
+            allMessages.forEach(msg => {
+                let groupId;
+                
+                if (msg.message_type === 'hook_event') {
+                    // For hook events, try to map to the main conversation
+                    const hookSessionId = msg.session_id;
+                    groupId = sessionToConversationMap[hookSessionId] || msg.conversation_id || hookSessionId || 'no-session';
+                } else {
+                    // For regular messages, use conversation_id first, then session_id
+                    groupId = msg.conversation_id || msg.session_id || 'no-session';
+                }
+                
                 if (!messagesBySession[groupId]) {
                     messagesBySession[groupId] = [];
                 }
                 messagesBySession[groupId].push(msg);
             });
             
-            // Sort messages within each session
+            // Sort messages within each session by timestamp
             Object.keys(messagesBySession).forEach(sessionId => {
                 messagesBySession[sessionId].sort((a, b) => 
                     new Date(a.timestamp) - new Date(b.timestamp)
@@ -747,6 +772,44 @@
                         <div style="margin-bottom: 10px; padding: 10px; background: #e8f5e9; border-radius: 5px; border-left: 4px solid #4caf50;">
                             <strong>Claude:</strong> <span style="color: #4caf50; font-style: italic;">(completed)</span>
                             <div style="margin-top: 8px; font-family: monospace; white-space: pre-wrap;">${escapeHtml(msg.result || '')}</div>
+                        </div>
+                        <div style="font-size: 12px; color: #666; margin-top: 10px;">
+                            ${new Date(msg.timestamp).toLocaleString()}
+                        </div>
+                    </div>
+                `;
+            } else if (messageType === 'hook_event') {
+                const eventType = msg.event_type || 'unknown';
+                const hookData = msg.data || {};
+                const toolName = hookData.tool_name || 'unknown';
+                const toolInput = hookData.tool_input || {};
+                const toolResponse = hookData.tool_response || {};
+                
+                // Different styling based on event type
+                const eventColor = eventType === 'pre_tool_use' ? '#9c27b0' : '#673ab7';
+                const eventIcon = eventType === 'pre_tool_use' ? '🔥' : '✅';
+                const eventTitle = eventType === 'pre_tool_use' ? 'Pre-Tool Use' : 'Post-Tool Use';
+                
+                return `
+                    <div class="message hook-event">
+                        <div style="margin-bottom: 10px; padding: 10px; background: #f3e5f5; border-radius: 5px; border-left: 4px solid ${eventColor};">
+                            <strong>${eventIcon} ${eventTitle}:</strong> <span style="color: ${eventColor}; font-weight: bold;">${toolName}</span>
+                            ${eventType === 'pre_tool_use' ? `
+                                <div style="margin-top: 8px; font-size: 12px; color: #666;">
+                                    <strong>Input:</strong> ${JSON.stringify(toolInput, null, 2).length > 100 ? 
+                                        Object.keys(toolInput).join(', ') : 
+                                        JSON.stringify(toolInput)}
+                                </div>
+                            ` : `
+                                <div style="margin-top: 8px; font-size: 12px; color: #666;">
+                                    <strong>Input:</strong> ${JSON.stringify(toolInput, null, 2).length > 100 ? 
+                                        Object.keys(toolInput).join(', ') : 
+                                        JSON.stringify(toolInput)}
+                                    <br><strong>Response:</strong> ${JSON.stringify(toolResponse, null, 2).length > 100 ? 
+                                        Object.keys(toolResponse).join(', ') : 
+                                        JSON.stringify(toolResponse)}
+                                </div>
+                            `}
                         </div>
                         <div style="font-size: 12px; color: #666; margin-top: 10px;">
                             ${new Date(msg.timestamp).toLocaleString()}

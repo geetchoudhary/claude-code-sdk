@@ -206,7 +206,7 @@ async def proxy_init_project(request: Request):
 
 @app.post("/webhook")
 async def receive_webhook(request: Request):
-    """Receive webhook from Claude Code API"""
+    """Receive webhook from Claude Code API or Hook Events"""
     try:
         payload = await request.json()
         
@@ -214,7 +214,34 @@ async def receive_webhook(request: Request):
         if 'received_at' not in payload:
             payload['received_at'] = datetime.utcnow().isoformat()
         
-        # Store message based on status
+        # Handle hook events
+        event_type = payload.get('event')
+        if event_type in ['pre_tool_use', 'post_tool_use']:
+            # This is a hook event
+            print(f"🔥 Hook event received: {event_type} - Tool: {payload.get('data', {}).get('tool_name')}")
+            
+            # Store hook event in messages
+            async with messages_lock:
+                hook_message = {
+                    'message_type': 'hook_event',
+                    'event_type': event_type,
+                    'data': payload.get('data', {}),
+                    'timestamp': payload.get('timestamp'),
+                    'session_id': payload.get('session_id'),
+                    'received_at': payload['received_at']
+                }
+                messages.append(hook_message)
+                
+                # Keep only the latest messages
+                if len(messages) > MAX_MESSAGES:
+                    messages.pop(0)
+            
+            # Notify all SSE clients
+            await notify_sse_clients({'type': 'hook_event', 'data': payload})
+            
+            return JSONResponse(content={"status": "received"}, status_code=200)
+        
+        # Handle regular webhook events
         async with messages_lock:
             status = payload.get('status')
             
