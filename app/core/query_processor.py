@@ -321,6 +321,8 @@ class ClaudeQueryProcessor:
             "resume": session_id,
         }
 
+        self.logger.info(f"Claude options: {claude_options_dict}")
+
         # Handle permission modes and MCP configuration
         permission_mode = options.get("permission_mode", "acceptEdits") if options else "acceptEdits"
         use_mcp = permission_mode == "interactive"
@@ -352,10 +354,32 @@ class ClaudeQueryProcessor:
         return ClaudeCodeOptions(**claude_options_dict)
 
     def _get_mcp_servers(self, options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Get MCP servers configuration."""
+        """Get MCP servers configuration from project directory."""
         if options and "mcp_servers" in options:
             return options["mcp_servers"]
-
+            
+        # If cwd is provided in options, try to load mcp-servers.json from that directory
+        if options and "cwd" in options:
+            try:
+                from pathlib import Path
+                project_dir = Path(options["cwd"])
+                mcp_config_file = project_dir / "mcp-servers.json"
+                
+                if mcp_config_file.exists():
+                    import json
+                    with open(mcp_config_file, "r") as f:
+                        mcp_config = json.load(f)
+                        self.logger.info(
+                            f"Loaded MCP servers from project: {mcp_config_file}",
+                            servers=list(mcp_config.get("mcpServers", {}).keys())
+                        )
+                        return mcp_config.get("mcpServers", {})
+                else:
+                    self.logger.warning(f"No mcp-servers.json found at {mcp_config_file}")
+            except Exception as e:
+                self.logger.error(f"Error loading project MCP config: {e}")
+                
+        # Fallback to global MCP config
         mcp_config = get_mcp_config()
         return mcp_config.get("mcpServers", {}) if mcp_config else {}
 
