@@ -2,9 +2,10 @@ import asyncio
 import logging
 from typing import Optional, Dict, Any, List
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
+import structlog
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,9 +26,25 @@ from claude_code_sdk import (
     ProcessError
 )
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.JSONRenderer()
+    ],
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
+
+logger = structlog.get_logger(__name__)
 
 # Configuration
 PROJECT_ROOT = "/Users/mastergeet/Repos/claude_test"
@@ -185,111 +202,695 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-async def send_webhook(webhook_url: str, payload: WebhookPayload):
-    """Send webhook notification"""
-    logger.info(f"Attempting to send webhook to URL: {webhook_url}")
-    logger.info(f"Webhook payload: task_id={payload.task_id}, session_id={payload.session_id}, status={payload.status}")
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            logger.info(f"Creating HTTP POST request to {webhook_url}")
-            response = await client.post(
-                webhook_url,
-                json=payload.model_dump(mode='json'),
-                timeout=10.0
-            )
-            if response.status_code >= 400:
-                logger.error(f"Webhook failed: {response.status_code} - {response.text}")
-            else:
-                logger.info(f"Webhook sent successfully to {webhook_url} - Status: {response.status_code}")
-    except httpx.ConnectError as e:
-        logger.error(f"Connection error sending webhook to {webhook_url}: {e}")
-    except httpx.TimeoutException as e:
-        logger.error(f"Timeout sending webhook to {webhook_url}: {e}")
-    except Exception as e:
-        logger.error(f"Failed to send webhook to {webhook_url}: {type(e).__name__}: {e}")
 
-async def process_query(
-    task_id: str,
-    prompt: str,
-    webhook_url: str,
-    session_id: Optional[str] = None,
-    conversation_id: Optional[str] = None,
-    options: Optional[Dict[str, Any]] = None
-):
-    """Process Claude query and send webhook when complete"""
-    logger.info(f"Processing task {task_id} - Prompt: {prompt[:50]}...")
+class SessionManager:
+    """Manages Claude session lifecycle and state tracking"""
     
-    try:
-        # Send the user's prompt as a webhook to display in chat
-        await send_webhook(webhook_url, WebhookPayload(
+    def __init__(self):
+        self.logger = structlog.get_logger(self.__class__.__name__)
+        self.active_sessions: Dict[str, Dict[str, Any]] = {}
+        self.session_stats: Dict[str, Dict[str, Any]] = {}
+        
+    def track_session(self, session_id: str, user_id: Optional[str] = None, conversation_id: Optional[str] = None):
+        """Track a new or existing session"""
+        if session_id not in self.active_sessions:
+            self.active_sessions[session_id] = {
+                'session_id': session_id,
+                'user_id': user_id,
+                'conversation_id': conversation_id,
+                'created_at': datetime.utcnow(),
+                'last_used': datetime.utcnow(),
+                'query_count': 0,
+                'total_tokens': 0,
+                'tools_used': [],
+                'status': 'active'
+            }
+            self.logger.info(
+                "New session tracked",
+                session_id=session_id,
+                user_id=user_id,
+                conversation_id=conversation_id
+            )
+        else:
+            # Update existing session
+            self.active_sessions[session_id]['last_used'] = datetime.utcnow()
+            self.active_sessions[session_id]['query_count'] += 1
+            
+    def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get session information"""
+        return self.active_sessions.get(session_id)
+    
+    def mark_session_completed(self, session_id: str):
+        """Mark session as completed"""
+        if session_id in self.active_sessions:
+            self.active_sessions[session_id]['status'] = 'completed'
+            self.active_sessions[session_id]['completed_at'] = datetime.utcnow()
+            
+    def cleanup_old_sessions(self, max_age_hours: int = 24):
+        """Clean up old sessions"""
+        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+        expired_sessions = [
+            session_id for session_id, info in self.active_sessions.items()
+            if info['last_used'] < cutoff_time
+        ]
+        
+        for session_id in expired_sessions:
+            self.logger.info("Cleaning up expired session", session_id=session_id)
+            del self.active_sessions[session_id]
+            
+        return len(expired_sessions)
+    
+    def get_session_stats(self) -> Dict[str, Any]:
+        """Get overall session statistics"""
+        return {
+            'active_sessions': len(self.active_sessions),
+            'total_queries': sum(info['query_count'] for info in self.active_sessions.values()),
+            'sessions_by_status': {
+                'active': len([s for s in self.active_sessions.values() if s['status'] == 'active']),
+                'completed': len([s for s in self.active_sessions.values() if s['status'] == 'completed'])
+            }
+        }
+
+class QueryMonitor:
+    """Monitors query performance and usage patterns"""
+    
+    def __init__(self):
+        self.logger = structlog.get_logger(self.__class__.__name__)
+        self.query_metrics: Dict[str, Dict[str, Any]] = {}
+        self.performance_stats: List[Dict[str, Any]] = []
+        
+    def start_query_monitoring(self, task_id: str) -> Dict[str, Any]:
+        """Start monitoring a query"""
+        monitoring_data = {
+            'task_id': task_id,
+            'start_time': datetime.utcnow(),
+            'status': 'running',
+            'messages_received': 0,
+            'webhook_calls': 0,
+            'errors': []
+        }
+        
+        self.query_metrics[task_id] = monitoring_data
+        return monitoring_data
+    
+    def record_message_received(self, task_id: str):
+        """Record a message received from Claude"""
+        if task_id in self.query_metrics:
+            self.query_metrics[task_id]['messages_received'] += 1
+            
+    def record_webhook_sent(self, task_id: str, webhook_url: str, status_code: int):
+        """Record a webhook sent"""
+        if task_id in self.query_metrics:
+            self.query_metrics[task_id]['webhook_calls'] += 1
+            if status_code >= 400:
+                self.query_metrics[task_id]['errors'].append({
+                    'type': 'webhook_error',
+                    'status_code': status_code,
+                    'url': webhook_url,
+                    'timestamp': datetime.utcnow()
+                })
+    
+    def record_error(self, task_id: str, error_type: str, error_message: str):
+        """Record an error during query processing"""
+        if task_id in self.query_metrics:
+            self.query_metrics[task_id]['errors'].append({
+                'type': error_type,
+                'message': error_message,
+                'timestamp': datetime.utcnow()
+            })
+    
+    def complete_query_monitoring(self, task_id: str, success: bool = True):
+        """Complete monitoring for a query"""
+        if task_id in self.query_metrics:
+            monitoring_data = self.query_metrics[task_id]
+            monitoring_data['end_time'] = datetime.utcnow()
+            monitoring_data['duration'] = (
+                monitoring_data['end_time'] - monitoring_data['start_time']
+            ).total_seconds()
+            monitoring_data['status'] = 'completed' if success else 'failed'
+            
+            # Store in performance stats
+            self.performance_stats.append(monitoring_data.copy())
+            
+            # Keep only last 1000 performance records
+            if len(self.performance_stats) > 1000:
+                self.performance_stats = self.performance_stats[-1000:]
+            
+            self.logger.info(
+                "Query monitoring completed",
+                task_id=task_id,
+                duration=monitoring_data['duration'],
+                success=success,
+                messages_received=monitoring_data['messages_received'],
+                webhook_calls=monitoring_data['webhook_calls'],
+                errors=len(monitoring_data['errors'])
+            )
+            
+            # Clean up current metrics
+            del self.query_metrics[task_id]
+    
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """Get performance statistics"""
+        if not self.performance_stats:
+            return {'total_queries': 0}
+            
+        successful_queries = [s for s in self.performance_stats if s['status'] == 'completed']
+        failed_queries = [s for s in self.performance_stats if s['status'] == 'failed']
+        
+        if successful_queries:
+            avg_duration = sum(s['duration'] for s in successful_queries) / len(successful_queries)
+            avg_messages = sum(s['messages_received'] for s in successful_queries) / len(successful_queries)
+        else:
+            avg_duration = 0
+            avg_messages = 0
+            
+        return {
+            'total_queries': len(self.performance_stats),
+            'successful_queries': len(successful_queries),
+            'failed_queries': len(failed_queries),
+            'success_rate': len(successful_queries) / len(self.performance_stats) if self.performance_stats else 0,
+            'average_duration': avg_duration,
+            'average_messages_per_query': avg_messages
+        }
+
+class ErrorRecoveryManager:
+    """Handles error recovery and retry logic for Claude queries"""
+    
+    def __init__(self):
+        self.logger = structlog.get_logger(self.__class__.__name__)
+        self.recovery_strategies = {
+            'timeout': self._handle_timeout_recovery,
+            'process_error': self._handle_process_error_recovery,
+            'sdk_error': self._handle_sdk_error_recovery,
+            'cli_not_found': self._handle_cli_not_found_recovery,
+            'webhook_error': self._handle_webhook_error_recovery
+        }
+    
+    async def attempt_recovery(
+        self,
+        error_type: str,
+        task_id: str,
+        error_context: Dict[str, Any],
+        retry_count: int = 0,
+        max_retries: int = 3
+    ) -> tuple[bool, Optional[str]]:
+        """Attempt to recover from an error"""
+        if retry_count >= max_retries:
+            self.logger.error(
+                "Maximum retries exceeded",
+                task_id=task_id,
+                error_type=error_type,
+                retry_count=retry_count
+            )
+            return False, "Maximum retries exceeded"
+        
+        self.logger.info(
+            "Attempting error recovery",
+            task_id=task_id,
+            error_type=error_type,
+            retry_count=retry_count
+        )
+        
+        if error_type in self.recovery_strategies:
+            return await self.recovery_strategies[error_type](task_id, error_context, retry_count)
+        else:
+            self.logger.warning(
+                "No recovery strategy for error type",
+                task_id=task_id,
+                error_type=error_type
+            )
+            return False, f"No recovery strategy for {error_type}"
+    
+    async def _handle_timeout_recovery(
+        self,
+        task_id: str,
+        error_context: Dict[str, Any],
+        retry_count: int
+    ) -> tuple[bool, Optional[str]]:
+        """Handle timeout recovery with exponential backoff"""
+        backoff_delay = min(30, 2 ** retry_count)  # Cap at 30 seconds
+        self.logger.info(
+            "Timeout recovery: waiting before retry",
+            task_id=task_id,
+            backoff_delay=backoff_delay,
+            retry_count=retry_count
+        )
+        
+        await asyncio.sleep(backoff_delay)
+        return True, "Timeout recovery: retry after backoff"
+    
+    async def _handle_process_error_recovery(
+        self,
+        task_id: str,
+        error_context: Dict[str, Any],
+        retry_count: int
+    ) -> tuple[bool, Optional[str]]:
+        """Handle process error recovery"""
+        exit_code = error_context.get('exit_code', 0)
+        
+        # Specific recovery strategies based on exit code
+        if exit_code == 1:
+            # Generic error - try with reduced options
+            self.logger.info(
+                "Process error recovery: reducing options",
+                task_id=task_id,
+                exit_code=exit_code
+            )
+            return True, "Process error recovery: retry with reduced options"
+        elif exit_code == 2:
+            # Permission error - try with different permission mode
+            self.logger.info(
+                "Process error recovery: changing permission mode",
+                task_id=task_id,
+                exit_code=exit_code
+            )
+            return True, "Process error recovery: retry with different permissions"
+        else:
+            # Unknown exit code - limited retry
+            if retry_count < 1:
+                return True, f"Process error recovery: retry for exit code {exit_code}"
+            else:
+                return False, f"Process error recovery failed: exit code {exit_code}"
+    
+    async def _handle_sdk_error_recovery(
+        self,
+        task_id: str,
+        error_context: Dict[str, Any],
+        retry_count: int
+    ) -> tuple[bool, Optional[str]]:
+        """Handle Claude SDK error recovery"""
+        error_message = error_context.get('error_message', '')
+        
+        # Check for specific SDK errors
+        if 'rate limit' in error_message.lower():
+            # Rate limit - wait longer
+            backoff_delay = min(120, 30 * (retry_count + 1))
+            self.logger.info(
+                "SDK rate limit recovery: waiting",
+                task_id=task_id,
+                backoff_delay=backoff_delay
+            )
+            await asyncio.sleep(backoff_delay)
+            return True, "SDK rate limit recovery: retry after extended wait"
+        elif 'authentication' in error_message.lower():
+            # Auth error - no point in retrying
+            return False, "SDK authentication error: no recovery possible"
+        elif 'quota' in error_message.lower():
+            # Quota exceeded - no point in retrying
+            return False, "SDK quota exceeded: no recovery possible"
+        else:
+            # Generic SDK error - try once more
+            if retry_count < 1:
+                await asyncio.sleep(5)
+                return True, "SDK error recovery: retry after short delay"
+            else:
+                return False, "SDK error recovery failed: unknown error"
+    
+    async def _handle_cli_not_found_recovery(
+        self,
+        task_id: str,
+        error_context: Dict[str, Any],
+        retry_count: int
+    ) -> tuple[bool, Optional[str]]:
+        """Handle CLI not found error recovery"""
+        # CLI not found is typically not recoverable without system changes
+        return False, "CLI not found: requires system installation"
+    
+    async def _handle_webhook_error_recovery(
+        self,
+        task_id: str,
+        error_context: Dict[str, Any],
+        retry_count: int
+    ) -> tuple[bool, Optional[str]]:
+        """Handle webhook error recovery"""
+        status_code = error_context.get('status_code', 500)
+        
+        # Retry webhook calls for temporary failures
+        if status_code >= 500:
+            # Server error - retry
+            backoff_delay = min(10, 2 ** retry_count)
+            await asyncio.sleep(backoff_delay)
+            return True, f"Webhook server error recovery: retry after {backoff_delay}s"
+        elif status_code == 404:
+            # Not found - no point in retrying
+            return False, "Webhook not found: endpoint unavailable"
+        elif status_code >= 400:
+            # Client error - limited retry
+            if retry_count < 1:
+                await asyncio.sleep(2)
+                return True, "Webhook client error recovery: retry once"
+            else:
+                return False, f"Webhook client error: {status_code}"
+        else:
+            return False, f"Webhook error recovery failed: status {status_code}"
+
+class ClaudeQueryProcessor:
+    """Handles Claude query processing with proper error handling and session management"""
+    
+    def __init__(self):
+        self.logger = structlog.get_logger(__name__)
+        self.active_queries: Dict[str, asyncio.Task] = {}
+        self.session_manager = SessionManager()
+        self.query_monitor = QueryMonitor()
+        self.error_recovery = ErrorRecoveryManager()
+    
+    async def process_query_with_retry(
+        self,
+        task_id: str,
+        prompt: str,
+        webhook_url: str,
+        session_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        options: Optional[Dict[str, Any]] = None,
+        timeout: int = 300,
+        max_retries: int = 3
+    ):
+        """Process Claude query with retry logic and error recovery"""
+        retry_count = 0
+        last_error = None
+        
+        while retry_count <= max_retries:
+            try:
+                await self.process_query_with_timeout(
+                    task_id, prompt, webhook_url, session_id, conversation_id, options, timeout
+                )
+                return  # Success - exit retry loop
+                
+            except Exception as e:
+                last_error = e
+                error_type = self._classify_error(e)
+                
+                self.logger.warning(
+                    "Query attempt failed",
+                    task_id=task_id,
+                    retry_count=retry_count,
+                    error_type=error_type,
+                    error=str(e)
+                )
+                
+                if retry_count >= max_retries:
+                    self.logger.error(
+                        "All retry attempts exhausted",
+                        task_id=task_id,
+                        max_retries=max_retries,
+                        final_error=str(e)
+                    )
+                    break
+                
+                # Attempt error recovery
+                can_recover, recovery_message = await self.error_recovery.attempt_recovery(
+                    error_type,
+                    task_id,
+                    self._build_error_context(e),
+                    retry_count,
+                    max_retries
+                )
+                
+                if can_recover:
+                    self.logger.info(
+                        "Error recovery successful, retrying",
+                        task_id=task_id,
+                        retry_count=retry_count + 1,
+                        recovery_message=recovery_message
+                    )
+                    retry_count += 1
+                else:
+                    self.logger.error(
+                        "Error recovery failed, aborting",
+                        task_id=task_id,
+                        retry_count=retry_count,
+                        recovery_message=recovery_message
+                    )
+                    break
+        
+        # If we reach here, all retries failed
+        if last_error:
+            raise last_error
+    
+    def _classify_error(self, error: Exception) -> str:
+        """Classify error type for recovery strategy"""
+        if isinstance(error, asyncio.TimeoutError):
+            return 'timeout'
+        elif isinstance(error, ProcessError):
+            return 'process_error'
+        elif isinstance(error, ClaudeSDKError):
+            return 'sdk_error'
+        elif isinstance(error, CLINotFoundError):
+            return 'cli_not_found'
+        elif 'webhook' in str(error).lower():
+            return 'webhook_error'
+        else:
+            return 'unknown_error'
+    
+    def _build_error_context(self, error: Exception) -> Dict[str, Any]:
+        """Build error context for recovery strategies"""
+        context = {
+            'error_message': str(error),
+            'error_type': type(error).__name__
+        }
+        
+        if isinstance(error, ProcessError):
+            context['exit_code'] = error.exit_code
+        
+        return context
+        
+    async def process_query_with_timeout(
+        self,
+        task_id: str,
+        prompt: str,
+        webhook_url: str,
+        session_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        options: Optional[Dict[str, Any]] = None,
+        timeout: int = 300
+    ):
+        """Process Claude query with timeout and proper error handling"""
+        # Start monitoring
+        self.query_monitor.start_query_monitoring(task_id)
+        
+        # Track session if provided
+        if session_id:
+            self.session_manager.track_session(session_id, conversation_id=conversation_id)
+        
+        success = False
+        try:
+            # Create the query task
+            query_task = asyncio.create_task(
+                self._process_query_internal(
+                    task_id, prompt, webhook_url, session_id, conversation_id, options
+                )
+            )
+            
+            # Store the task for potential cancellation
+            self.active_queries[task_id] = query_task
+            
+            # Wait for completion with timeout
+            try:
+                await asyncio.wait_for(query_task, timeout=timeout)
+                success = True
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Query timed out",
+                    task_id=task_id,
+                    timeout=timeout
+                )
+                self.query_monitor.record_error(task_id, "timeout", f"Query timed out after {timeout} seconds")
+                query_task.cancel()
+                await self._send_error_webhook(
+                    webhook_url, task_id, session_id, conversation_id,
+                    f"Query timed out after {timeout} seconds"
+                )
+                
+        except Exception as e:
+            self.logger.error(
+                "Error in query processing",
+                task_id=task_id,
+                error=str(e),
+                exc_info=True
+            )
+            self.query_monitor.record_error(task_id, "processing_error", str(e))
+            await self._send_error_webhook(
+                webhook_url, task_id, session_id, conversation_id, str(e)
+            )
+        finally:
+            # Complete monitoring
+            self.query_monitor.complete_query_monitoring(task_id, success)
+            
+            # Clean up the task reference
+            self.active_queries.pop(task_id, None)
+    
+    async def _process_query_internal(
+        self,
+        task_id: str,
+        prompt: str,
+        webhook_url: str,
+        session_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        options: Optional[Dict[str, Any]] = None
+    ):
+        """Internal query processing with structured error handling"""
+        self.logger.info(
+            "Starting query processing",
             task_id=task_id,
             session_id=session_id,
             conversation_id=conversation_id,
-            status="user_message",
-            result=prompt,
-            timestamp=datetime.utcnow()
-        ))
-        # Get permission mode from options
-        permission_mode = options.get('permission_mode', 'acceptEdits') if options else 'acceptEdits'
-        use_mcp = permission_mode == 'interactive'
+            prompt_length=len(prompt)
+        )
         
-        # Base Claude options
+        try:
+            # Send user message webhook
+            await self._send_webhook(webhook_url, WebhookPayload(
+                task_id=task_id,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                status="user_message",
+                result=prompt,
+                timestamp=datetime.utcnow()
+            ))
+            
+            # Build Claude options with proper configuration
+            claude_options = self._build_claude_options(options, session_id)
+            
+            # Execute query with proper message handling
+            result_session_id, result_text = await self._execute_claude_query(
+                task_id, prompt, claude_options, webhook_url, session_id, conversation_id
+            )
+            
+            # Send success webhook
+            await self._send_webhook(webhook_url, WebhookPayload(
+                task_id=task_id,
+                session_id=result_session_id,
+                conversation_id=conversation_id,
+                status="completed",
+                result=result_text,
+                timestamp=datetime.utcnow()
+            ))
+            
+            self.logger.info(
+                "Query completed successfully",
+                task_id=task_id,
+                session_id=result_session_id,
+                result_length=len(result_text) if result_text else 0
+            )
+            
+        except CLINotFoundError as e:
+            error_msg = "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+            self.logger.error(
+                "Claude CLI not found",
+                task_id=task_id,
+                error=error_msg
+            )
+            await self._send_error_webhook(webhook_url, task_id, session_id, conversation_id, error_msg)
+            
+        except ProcessError as e:
+            error_msg = f"Claude process failed with exit code {e.exit_code}"
+            self.logger.error(
+                "Claude process error",
+                task_id=task_id,
+                exit_code=e.exit_code,
+                error=str(e)
+            )
+            await self._send_error_webhook(webhook_url, task_id, session_id, conversation_id, error_msg)
+            
+        except ClaudeSDKError as e:
+            error_msg = f"Claude SDK error: {str(e)}"
+            self.logger.error(
+                "Claude SDK error",
+                task_id=task_id,
+                error=str(e),
+                exc_info=True
+            )
+            await self._send_error_webhook(webhook_url, task_id, session_id, conversation_id, error_msg)
+            
+        except Exception as e:
+            error_msg = f"Unexpected error: {str(e)}"
+            self.logger.error(
+                "Unexpected error in query processing",
+                task_id=task_id,
+                error=str(e),
+                exc_info=True
+            )
+            await self._send_error_webhook(webhook_url, task_id, session_id, conversation_id, error_msg)
+    
+    def _build_claude_options(self, options: Optional[Dict[str, Any]], session_id: Optional[str]) -> ClaudeCodeOptions:
+        """Build Claude options with proper defaults and MCP configuration"""
+        # Default options
         claude_options_dict = {
             'cwd': options.get('cwd', PROJECT_ROOT) if options else PROJECT_ROOT,
             'allowed_tools': options.get('allowed_tools', ["Read", "Write", "LS", "Task"]) if options else ["Read", "Write", "LS", "Task"],
             'max_turns': options.get('max_turns', 8) if options else 8,
-            'resume': session_id  # Resume session if provided
+            'model': 'claude-3-5-sonnet-latest',
+            'resume': session_id
         }
-
-        logger.info(f"Options: {claude_options_dict}")
         
-        # Handle interactive permission mode with MCP
+        # Handle permission modes and MCP configuration
+        permission_mode = options.get('permission_mode', 'acceptEdits') if options else 'acceptEdits'
+        use_mcp = permission_mode == 'interactive'
+        
         if use_mcp:
-            # Use project-specific MCP config if provided in options, otherwise use global config
-            if options and 'mcp_servers' in options:
-                mcp_servers = options['mcp_servers']
-                logger.info(f"Task {task_id}: Using project-specific MCP config")
-            else:
-                mcp_config = get_mcp_config()
-                mcp_servers = mcp_config.get("mcpServers", {}) if mcp_config else {}
-                logger.info(f"Task {task_id}: Using global MCP config")
-            
+            mcp_servers = self._get_mcp_servers(options)
             if mcp_servers:
-                logger.info(f"Task {task_id}: Using MCP interactive permissions")
-                claude_options_dict['permission_mode'] = None  # Let MCP handle permissions
-                claude_options_dict['permission_prompt_tool_name'] = "mcp__approval-server__permissions__approve"
-                claude_options_dict['mcp_servers'] = mcp_servers
-                # Add context-manager tool when using MCP
-                claude_options_dict['allowed_tools'].append("mcp__context-manager")
-                claude_options_dict['allowed_tools'].append("mcp__context7")
-                claude_options_dict['allowed_tools'].append("mcp__github")
-                claude_options_dict['allowed_tools'].append("mcp__figma")
+                self.logger.info(
+                    "Configuring MCP interactive permissions",
+                    mcp_servers=list(mcp_servers.keys())
+                )
+                claude_options_dict.update({
+                    'permission_mode': None,
+                    'permission_prompt_tool_name': "mcp__approval-server__permissions__approve",
+                    'mcp_servers': mcp_servers
+                })
+                # Add MCP tools
+                claude_options_dict['allowed_tools'].extend([
+                    "mcp__context-manager",
+                    "mcp__context7",
+                    "mcp__github",
+                    "mcp__figma"
+                ])
             else:
-                logger.warning(f"Task {task_id}: MCP config not found, falling back to acceptEdits")
+                self.logger.warning("MCP config not found, falling back to acceptEdits")
                 claude_options_dict['permission_mode'] = 'acceptEdits'
         else:
-            # Use standard permission modes
             claude_options_dict['permission_mode'] = permission_mode
         
-        # Create Claude options
-        claude_options = ClaudeCodeOptions(**claude_options_dict)
+        return ClaudeCodeOptions(**claude_options_dict)
+    
+    def _get_mcp_servers(self, options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Get MCP servers configuration"""
+        if options and 'mcp_servers' in options:
+            return options['mcp_servers']
         
+        mcp_config = get_mcp_config()
+        return mcp_config.get("mcpServers", {}) if mcp_config else {}
+    
+    async def _execute_claude_query(
+        self,
+        task_id: str,
+        prompt: str,
+        claude_options: ClaudeCodeOptions,
+        webhook_url: str,
+        session_id: Optional[str],
+        conversation_id: Optional[str]
+    ) -> tuple[Optional[str], str]:
+        """Execute Claude query with proper message handling"""
         messages = []
         result_session_id = session_id
         final_result = None
         
-        # Execute query
         async for message in query(prompt=prompt, options=claude_options):
             if isinstance(message, Message):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
                             messages.append(block.text)
-                            logger.info(f"Task {task_id}: Received message chunk")
+                            self.query_monitor.record_message_received(task_id)
+                            self.logger.debug(
+                                "Received message chunk",
+                                task_id=task_id,
+                                chunk_length=len(block.text)
+                            )
                             
                             # Send intermediate message chunk via webhook
-                            await send_webhook(webhook_url, WebhookPayload(
+                            await self._send_webhook(webhook_url, WebhookPayload(
                                 task_id=task_id,
                                 session_id=result_session_id,
                                 conversation_id=conversation_id,
@@ -302,28 +903,71 @@ async def process_query(
             if isinstance(message, ResultMessage):
                 if hasattr(message, 'session_id'):
                     result_session_id = message.session_id
-                    logger.info(f"Task {task_id}: Session ID captured: {result_session_id}")
+                    self.logger.info(
+                        "Session ID captured",
+                        task_id=task_id,
+                        session_id=result_session_id
+                    )
                 if hasattr(message, 'result'):
                     final_result = message.result
-                    logger.info(f"Task {task_id}: Final result captured")
+                    self.logger.info(
+                        "Final result captured",
+                        task_id=task_id,
+                        result_length=len(final_result) if final_result else 0
+                    )
         
         # Use final_result if available, otherwise join messages
         result_text = final_result if final_result else "\n".join(messages)
-        
-        # Send success webhook
-        await send_webhook(webhook_url, WebhookPayload(
-            task_id=task_id,
-            session_id=result_session_id,
-            conversation_id=conversation_id,
-            status="completed",
-            result=result_text,
-            timestamp=datetime.utcnow()
-        ))
-        
-    except CLINotFoundError:
-        error_msg = "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
-        logger.error(f"Task {task_id}: {error_msg}")
-        await send_webhook(webhook_url, WebhookPayload(
+        return result_session_id, result_text
+    
+    async def _send_webhook(self, webhook_url: str, payload: WebhookPayload):
+        """Send webhook with proper error handling"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    webhook_url,
+                    json=payload.model_dump(mode='json'),
+                    timeout=10.0
+                )
+                
+                # Record webhook call
+                self.query_monitor.record_webhook_sent(payload.task_id, webhook_url, response.status_code)
+                
+                if response.status_code >= 400:
+                    self.logger.error(
+                        "Webhook failed",
+                        url=webhook_url,
+                        status_code=response.status_code,
+                        response=response.text,
+                        task_id=payload.task_id
+                    )
+                else:
+                    self.logger.debug(
+                        "Webhook sent successfully",
+                        url=webhook_url,
+                        status_code=response.status_code,
+                        task_id=payload.task_id
+                    )
+        except Exception as e:
+            self.logger.error(
+                "Failed to send webhook",
+                url=webhook_url,
+                error=str(e),
+                task_id=payload.task_id
+            )
+            # Record webhook error
+            self.query_monitor.record_webhook_sent(payload.task_id, webhook_url, 500)
+    
+    async def _send_error_webhook(
+        self,
+        webhook_url: str,
+        task_id: str,
+        session_id: Optional[str],
+        conversation_id: Optional[str],
+        error_msg: str
+    ):
+        """Send error webhook notification"""
+        await self._send_webhook(webhook_url, WebhookPayload(
             task_id=task_id,
             session_id=session_id,
             conversation_id=conversation_id,
@@ -331,30 +975,22 @@ async def process_query(
             error=error_msg,
             timestamp=datetime.utcnow()
         ))
-        
-    except ProcessError as e:
-        error_msg = f"Process failed with exit code {e.exit_code}"
-        logger.error(f"Task {task_id}: {error_msg}")
-        await send_webhook(webhook_url, WebhookPayload(
-            task_id=task_id,
-            session_id=session_id,
-            conversation_id=conversation_id,
-            status="failed",
-            error=error_msg,
-            timestamp=datetime.utcnow()
-        ))
-        
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Task {task_id}: Unexpected error - {error_msg}")
-        await send_webhook(webhook_url, WebhookPayload(
-            task_id=task_id,
-            session_id=session_id,
-            conversation_id=conversation_id,
-            status="failed",
-            error=error_msg,
-            timestamp=datetime.utcnow()
-        ))
+
+# Global query processor instance
+query_processor = ClaudeQueryProcessor()
+
+async def process_query(
+    task_id: str,
+    prompt: str,
+    webhook_url: str,
+    session_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    options: Optional[Dict[str, Any]] = None
+):
+    """Process Claude query using the structured query processor with retry logic"""
+    await query_processor.process_query_with_retry(
+        task_id, prompt, webhook_url, session_id, conversation_id, options
+    )
 
 @app.post("/query", response_model=QueryResponse)
 async def submit_query(request: QueryRequest, background_tasks: BackgroundTasks):
@@ -390,6 +1026,33 @@ async def submit_query(request: QueryRequest, background_tasks: BackgroundTasks)
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+@app.get("/metrics")
+async def get_metrics():
+    """Get performance metrics and session statistics"""
+    return {
+        "session_stats": query_processor.session_manager.get_session_stats(),
+        "performance_stats": query_processor.query_monitor.get_performance_stats(),
+        "active_queries": len(query_processor.active_queries),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+@app.get("/sessions/{session_id}")
+async def get_session_info(session_id: str):
+    """Get information about a specific session"""
+    session_info = query_processor.session_manager.get_session_info(session_id)
+    if not session_info:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session_info
+
+@app.post("/sessions/cleanup")
+async def cleanup_sessions(max_age_hours: int = 24):
+    """Clean up old sessions"""
+    cleaned_count = query_processor.session_manager.cleanup_old_sessions(max_age_hours)
+    return {
+        "cleaned_sessions": cleaned_count,
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 @app.get("/mcp/servers", response_model=List[MCPServer])
 async def list_mcp_servers():
@@ -1059,6 +1722,9 @@ async def root():
         "endpoints": {
             "POST /query": "Submit a query with webhook notification",
             "GET /health": "Health check",
+            "GET /metrics": "Get performance metrics and session statistics",
+            "GET /sessions/{session_id}": "Get information about a specific session",
+            "POST /sessions/cleanup": "Clean up old sessions",
             "GET /mcp/servers": "List available MCP servers",
             "POST /mcp/connect/{server_id}": "Connect to an MCP server",
             "DELETE /mcp/disconnect/{server_id}": "Disconnect from an MCP server",
