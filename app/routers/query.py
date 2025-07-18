@@ -61,7 +61,7 @@ async def submit_query(request: QueryRequest, background_tasks: BackgroundTasks)
 
     logger.info(
         f"New query submitted - Task: {task_id}, Session: {request.session_id}, "
-        f"Project: {request.org}/{request.project_path}"
+        f"Project: {request.organization_name}/{request.project_path}"
     )
     logger.info(f"Webhook URL received: {request.webhook_url}")
     logger.info(f"Prompt: {request.prompt[:100]}...")
@@ -72,7 +72,7 @@ async def submit_query(request: QueryRequest, background_tasks: BackgroundTasks)
         task_id=task_id,
         prompt=request.prompt,
         webhook_url=request.webhook_url,
-        org=request.org,
+        org=request.organization_name,
         project_path=request.project_path,
         session_id=request.session_id,
         conversation_id=request.conversation_id,

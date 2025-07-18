@@ -931,7 +931,7 @@ async def run_claude_init_with_query_processor(
             options={
                 "cwd": str(project_path),
                 "permission_mode": "bypassPermissions",
-                "system_prompt": "Write a claude.md file quickly in one line, don't use any other tools",
+                "system_prompt": "Only include files that are in the current directory",
                 "allowed_tools": ["Read", "Write", "LS", "Edit", "MultiEdit"],
                 "max_turns": 16
             },

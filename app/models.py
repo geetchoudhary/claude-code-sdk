@@ -17,7 +17,7 @@ class QueryRequest(BaseModel):
         default=None, description="Frontend conversation grouping ID"
     )
     webhook_url: str = Field(description="URL to notify when query completes")
-    org: str = Field(description="Organization name for project context")
+    organization_name: str = Field(description="Organization name for project context")
     project_path: str = Field(description="Project path within organization")
     options: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Additional options for Claude"
