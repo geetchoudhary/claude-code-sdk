@@ -458,9 +458,17 @@ def create_git_branch(project_path: Path, branch_name: str) -> subprocess.Comple
 
 
 def create_mcp_config_for_project(
-    project_path: Path, mcp_servers: Dict[str, Any], approval_server_path: Path
+    project_path: Path, mcp_servers: List[Any], approval_server_path: Path
 ):
-    """Create mcp-servers.json configuration for a project."""
+    """Create mcp-servers.json configuration for a project.
+    
+    Args:
+        project_path: Target project directory
+        mcp_servers: List of MCPServerConfig objects
+        approval_server_path: Path to the approval server script
+    """
+    from app.models import MCPServerType
+    
     mcp_config = {
         "mcpServers": {
             # Always include approval server
@@ -471,24 +479,62 @@ def create_mcp_config_for_project(
         }
     }
 
+    # MCP server configurations based on the reference mcp-servers.json
+    server_configs = {
+        MCPServerType.CONTEXT_MANAGER: {
+            "command": "npx",
+            "args": ["mcp-context-manager"]
+        },
+        MCPServerType.CONTEXT7: {
+            "command": "npx",
+            "args": ["-y", "@upstash/context7-mcp"]
+        },
+        MCPServerType.FIGMA: {
+            "command": "npx",
+            "args": ["-y", "figma-developer-mcp"],
+            "requires_token": True,
+            "token_arg_format": "--figma-api-key={token}",
+            "extra_args": ["--stdio"]
+        },
+        MCPServerType.GITHUB: {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
+            "requires_token": True,
+            "env_var": "GITHUB_PERSONAL_ACCESS_TOKEN"
+        }
+    }
+
     # Add selected MCP servers
-    for server_id, server_config in mcp_servers.items():
-        if server_id == "figma" and "env" in server_config and "FIGMA_API_KEY" in server_config["env"]:
-            # Special handling for Figma - add API key to args
-            figma_config = server_config.copy()
-            figma_config["args"] = figma_config["args"].copy()
-            figma_config["args"].extend(
-                [
-                    f"--figma-api-key={server_config['env']['FIGMA_API_KEY']}",
-                    "--stdio",
-                ]
-            )
-            # Remove env since it's now in args
-            if "env" in figma_config:
-                del figma_config["env"]
-            mcp_config["mcpServers"][server_id] = figma_config
-        else:
-            mcp_config["mcpServers"][server_id] = server_config
+    for server in mcp_servers:
+        if hasattr(server, 'server_type'):
+            server_type = server.server_type
+            access_token = getattr(server, 'access_token', None)
+            
+            if server_type in server_configs:
+                config = server_configs[server_type]
+                server_dict = {
+                    "command": config["command"],
+                    "args": config["args"].copy()
+                }
+                
+                # Handle token requirements
+                if config.get("requires_token") and access_token:
+                    if "token_arg_format" in config:
+                        # For Figma, add token as argument
+                        server_dict["args"].append(config["token_arg_format"].format(token=access_token))
+                        if "extra_args" in config:
+                            server_dict["args"].extend(config["extra_args"])
+                    elif "env_var" in config:
+                        # For GitHub, add as environment variable
+                        server_dict["env"] = {
+                            config["env_var"]: access_token
+                        }
+                elif config.get("requires_token"):
+                    logger.warning(f"Access token required but not provided for {server_type.value}")
+                    continue
+                
+                # Add to config using the enum value as key
+                mcp_config["mcpServers"][server_type.value] = server_dict
 
     # Write mcp-servers.json to project directory
     mcp_config_path = project_path / "mcp-servers.json"
@@ -498,3 +544,348 @@ def create_mcp_config_for_project(
     logger.info(
         f"Created mcp-servers.json with {len(mcp_servers)} servers (plus approval server)"
     )
+
+
+def copy_mcp_approval_server(project_path: Path, source_path: Path) -> bool:
+    """Copy mcp_approval_webhook_server.py to the project directory.
+    
+    Args:
+        project_path: Target project directory
+        source_path: Path to the original mcp_approval_webhook_server.py
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        if not source_path.exists():
+            logger.error(f"MCP approval server not found at {source_path}")
+            return False
+            
+        target_path = project_path / "mcp_approval_webhook_server.py"
+        import shutil
+        shutil.copy2(source_path, target_path)
+        
+        logger.info(f"Copied MCP approval server to {target_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to copy MCP approval server: {e}")
+        return False
+
+
+def setup_claude_directory(project_path: Path, webhook_url: str) -> bool:
+    """Setup .claude directory with hooks and settings.json from resources.
+    
+    Args:
+        project_path: Project directory path
+        webhook_url: Webhook URL for settings configuration
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        import shutil
+        
+        # Get resources directory
+        resources_dir = settings.project_root / "resources"
+        
+        # Create .claude directory
+        claude_dir = project_path / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        
+        # Copy settings.json from resources
+        settings_source = resources_dir / "settings.json"
+        if settings_source.exists():
+            with open(settings_source, "r") as f:
+                settings_content = json.load(f)
+            
+            # Update webhook URL in settings if needed
+            if "webhook" in settings_content:
+                settings_content["webhook"]["url"] = webhook_url
+            
+            settings_path = claude_dir / "settings.json"
+            with open(settings_path, "w") as f:
+                json.dump(settings_content, f, indent=2)
+            logger.info("Copied and updated settings.json from resources")
+        else:
+            logger.warning(f"Settings file not found at {settings_source}")
+            
+        # Copy hooks directory from resources
+        hooks_source = resources_dir / "hooks"
+        hooks_dest = claude_dir / "hooks"
+        
+        if hooks_source.exists() and hooks_source.is_dir():
+            # Create hooks directory
+            hooks_dest.mkdir(exist_ok=True)
+            
+            # Copy all hook files
+            for hook_file in hooks_source.iterdir():
+                if hook_file.is_file():
+                    dest_file = hooks_dest / hook_file.name
+                    shutil.copy2(hook_file, dest_file)
+                    
+                    # Make hook files executable if they are scripts
+                    if hook_file.suffix in [".py", ".sh"] or hook_file.name in ["pre-commit", "post-commit", "pre-push"]:
+                        dest_file.chmod(0o755)
+                    
+                    logger.info(f"Copied hook file: {hook_file.name}")
+            
+            logger.info(f"Copied hooks directory from resources")
+        else:
+            logger.warning(f"Hooks directory not found at {hooks_source}")
+            # Create basic hooks directory as fallback
+            hooks_dest.mkdir(exist_ok=True)
+            
+        logger.info(f"Created .claude directory with hooks and settings.json")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to setup .claude directory: {e}")
+        return False
+
+
+def create_slash_commands(project_path: Path) -> bool:
+    """Create slash commands directory and default commands.
+    
+    Args:
+        project_path: Project directory path
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Create .claude/commands directory
+        claude_dir = project_path / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        
+        commands_dir = claude_dir / "commands"
+        commands_dir.mkdir(exist_ok=True)
+        
+        # Create default slash commands
+        commands = {
+            "lint.md": """# /lint
+
+Runs linting on the current project.
+
+## Usage
+```
+/lint [options]
+```
+
+## Options
+- `--fix`: Automatically fix linting errors where possible
+- `--format <formatter>`: Specify output format (default: stylish)
+
+## Examples
+```
+/lint
+/lint --fix
+/lint --format json
+```
+""",
+            "test.md": """# /test
+
+Runs tests for the current project.
+
+## Usage
+```
+/test [pattern] [options]
+```
+
+## Options
+- `--coverage`: Generate coverage report
+- `--watch`: Run tests in watch mode
+- `--verbose`: Show detailed test output
+
+## Examples
+```
+/test
+/test user.test.js
+/test --coverage
+/test --watch
+```
+""",
+            "deploy.md": """# /deploy
+
+Deploy the project to the specified environment.
+
+## Usage
+```
+/deploy <environment> [options]
+```
+
+## Options
+- `--dry-run`: Show what would be deployed without actually deploying
+- `--force`: Force deployment even if checks fail
+- `--rollback`: Rollback to previous deployment
+
+## Examples
+```
+/deploy staging
+/deploy production --dry-run
+/deploy production --rollback
+```
+""",
+            "todo.md": """# /todo
+
+Manage project todos and tasks.
+
+## Usage
+```
+/todo <action> [args]
+```
+
+## Actions
+- `add <task>`: Add a new todo
+- `list`: List all todos
+- `complete <id>`: Mark todo as complete
+- `remove <id>`: Remove a todo
+
+## Examples
+```
+/todo add "Fix authentication bug"
+/todo list
+/todo complete 1
+/todo remove 2
+```
+"""
+        }
+        
+        # Write command files
+        for cmd_name, content in commands.items():
+            cmd_path = commands_dir / cmd_name
+            with open(cmd_path, "w") as f:
+                f.write(content)
+                
+        # Create commands index
+        index_content = {
+            "commands": [
+                {
+                    "name": "lint",
+                    "description": "Run linting on the project",
+                    "file": "lint.md"
+                },
+                {
+                    "name": "test",
+                    "description": "Run project tests",
+                    "file": "test.md"
+                },
+                {
+                    "name": "deploy",
+                    "description": "Deploy the project",
+                    "file": "deploy.md"
+                },
+                {
+                    "name": "todo",
+                    "description": "Manage project todos",
+                    "file": "todo.md"
+                }
+            ]
+        }
+        
+        index_path = commands_dir / "index.json"
+        with open(index_path, "w") as f:
+            json.dump(index_content, f, indent=2)
+            
+        logger.info(f"Created slash commands in {commands_dir}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to create slash commands: {e}")
+        return False
+
+
+async def run_default_mcp_commands(
+    project_path: Path, 
+    mcp_servers: Dict[str, Any],
+    webhook_url: str
+) -> List[Dict[str, Any]]:
+    """Run default MCP server initialization commands.
+    
+    Args:
+        project_path: Project directory path
+        mcp_servers: MCP servers configuration
+        webhook_url: Webhook URL for notifications
+        
+    Returns:
+        List of results from running MCP commands
+    """
+    results = []
+    
+    try:
+        # Import query processor
+        from app.core.query_processor import ClaudeQueryProcessor
+        query_processor = ClaudeQueryProcessor()
+        
+        # Default MCP initialization commands
+        default_commands = []
+        
+        # Add context-manager specific commands if present
+        if "context-manager" in mcp_servers:
+            default_commands.extend([
+                "use context manager mcp and Use setup_context for the current directory",
+                "use context manager mcp and Use update_context for the current directory",
+                "use context manager mcp and Use persist_context for the current directory"
+            ])
+            
+        # Add github specific commands if present
+        if "github" in mcp_servers:
+            default_commands.append("use github mcp to list repositories")
+            
+        # Add figma specific commands if present
+        if "figma" in mcp_servers:
+            default_commands.append("use figma mcp to list available files")
+            
+        # Run each command
+        for i, command in enumerate(default_commands, 1):
+            try:
+                logger.info(f"Running MCP command {i}/{len(default_commands)}: {command}")
+                
+                task_id = str(uuid4())
+                await query_processor.process_query_with_retry(
+                    task_id=task_id,
+                    prompt=command,
+                    webhook_url=webhook_url,
+                    session_id=None,
+                    conversation_id=None,
+                    options={
+                        "cwd": str(project_path),
+                        "permission_mode": "interactive",
+                        "allowed_tools": [
+                            "mcp__context-manager",
+                            "mcp__github", 
+                            "mcp__figma",
+                            "Read", "Write", "LS"
+                        ],
+                        "mcp_servers": mcp_servers,
+                        "max_turns": 4
+                    },
+                    timeout=60  # Shorter timeout for init commands
+                )
+                
+                results.append({
+                    "command": command,
+                    "success": True,
+                    "task_id": task_id
+                })
+                
+            except Exception as e:
+                logger.error(f"Failed to run MCP command '{command}': {e}")
+                results.append({
+                    "command": command,
+                    "success": False,
+                    "error": str(e)
+                })
+                
+        logger.info(
+            f"MCP initialization completed: "
+            f"{len([r for r in results if r['success']])}/{len(results)} commands succeeded"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to run default MCP commands: {e}")
+        results.append({
+            "error": f"MCP initialization failed: {e}",
+            "success": False
+        })
+        
+    return results

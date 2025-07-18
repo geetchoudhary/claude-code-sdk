@@ -1,6 +1,7 @@
 """Pydantic models for request/response schemas."""
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -54,8 +55,8 @@ class MCPServer(BaseModel):
     env_vars: Optional[List[str]] = None
 
 
-class MCPServerConfig(BaseModel):
-    """MCP server configuration."""
+class MCPServerCommandConfig(BaseModel):
+    """MCP server command configuration."""
 
     command: str
     args: List[str]
@@ -68,6 +69,24 @@ class CustomConnectorRequest(BaseModel):
     command: Optional[str] = None
     args: Optional[List[str]] = None
     env: Optional[Dict[str, str]] = None
+
+
+# MCP Server Enum
+class MCPServerType(str, Enum):
+    """Supported MCP server types."""
+    
+    APPROVAL_SERVER = "approval-server"
+    CONTEXT_MANAGER = "context-manager"
+    CONTEXT7 = "context7"
+    FIGMA = "figma"
+    GITHUB = "github"
+
+
+class MCPServerConfig(BaseModel):
+    """Configuration for an MCP server."""
+    
+    server_type: MCPServerType = Field(description="Type of MCP server")
+    access_token: Optional[str] = Field(default=None, description="Access token for servers that require authentication")
 
 
 # Project Models
@@ -84,15 +103,43 @@ class AIInstructionFiles(BaseModel):
 class InitProjectRequest(BaseModel):
     """Request model for project initialization."""
 
+    organization_name: str = Field(description="Organization name for project directory structure")
+    project_path: str = Field(description="Project path within organization directory")
     github_repo_url: str = Field(description="GitHub repository URL to clone")
-    path: str = Field(description="Path within /projects directory where to create the project")
-    project_name: str = Field(description="Name of the project and branch to create")
-    mcp_servers: Optional[Dict[str, Any]] = Field(
-        default=None, description="MCP servers configuration for the project"
+    webhook_url: str = Field(description="Webhook URL for notifications")
+    mcp_servers: Optional[List[MCPServerConfig]] = Field(
+        default=None, description="List of MCP servers to enable for the project"
     )
-    ai_instruction_files: Optional[AIInstructionFiles] = Field(
-        default=None, description="AI instruction files to create"
-    )
+
+
+# Project Initialization Models
+class ProjectInitStatus(str, Enum):
+    """Project initialization status."""
+    
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class ProjectInitWebhookPayload(BaseModel):
+    """Webhook payload for project initialization steps."""
+    
+    task_id: str
+    task: str = "INIT_PROJECT"
+    step_name: str
+    completion_message: str
+    status: ProjectInitStatus
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    error: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class InitProjectResponse(BaseModel):
+    """Response model for project initialization."""
+    
+    task_id: str
+    status: str = "accepted"
+    message: str = "Project initialization started"
 
 
 # Session Models

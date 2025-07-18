@@ -3,150 +3,260 @@
 import json
 import shutil
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 import structlog
 
 from app.config import settings
-from app.models import InitProjectRequest
+from app.models import InitProjectRequest, InitProjectResponse, ProjectInitStatus
 from app.services.project_utils import (
     clone_repository,
-    create_ai_instruction_files,
-    create_basic_claude_md,
-    create_git_branch,
+    copy_mcp_approval_server,
     create_mcp_config_for_project,
+    create_slash_commands,
     run_claude_init_command,
-    run_context_manager_prompts,
-    update_claude_md_with_references,
+    run_default_mcp_commands,
+    setup_claude_directory,
 )
+from app.services.webhook_utils import send_project_init_webhook
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 
-@router.post("/init-project")
-async def init_project(request: InitProjectRequest):
-    """Initialize a new project by cloning a repository and creating a branch."""
+async def init_project_background(
+    task_id: str,
+    request: InitProjectRequest,
+):
+    """Background task to initialize a project with webhook notifications."""
+    webhook_url = request.webhook_url
+    
     try:
-        # Create the base projects directory within PROJECT_ROOT
+        # Step 1: Create directory structure
+        await send_project_init_webhook(
+            webhook_url, task_id, "create_directory", 
+            "Creating project directory structure...", 
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
         projects_dir = settings.projects_dir
         projects_dir.mkdir(exist_ok=True)
-
-        # Create the full project path
-        project_path = projects_dir / request.path
-
-        # Check if directory already exists
+        
+        org_path = projects_dir / request.organization_name
+        org_path.mkdir(exist_ok=True)
+        
+        project_path = org_path / request.project_path
+        
         if project_path.exists():
-            raise HTTPException(
-                status_code=400,
-                detail=f"Directory already exists: {project_path}",
+            await send_project_init_webhook(
+                webhook_url, task_id, "create_directory",
+                f"Directory already exists: {project_path}",
+                ProjectInitStatus.FAILED,
+                error=f"Directory already exists: {project_path}"
             )
-
-        # Create the directory
+            return
+            
         project_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created directory: {project_path}")
-
-        # Clone the repository
+        
+        await send_project_init_webhook(
+            webhook_url, task_id, "create_directory",
+            f"Created directory structure: {request.organization_name}/{request.project_path}",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        # Step 2: Clone repository
+        await send_project_init_webhook(
+            webhook_url, task_id, "clone_repository",
+            f"Cloning repository from {request.github_repo_url}...",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
         clone_result = clone_repository(request.github_repo_url, project_path)
-
+        
         if clone_result.returncode != 0:
-            # Clean up directory on failure
             if project_path.exists():
                 shutil.rmtree(project_path)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to clone repository: {clone_result.stderr}",
+            await send_project_init_webhook(
+                webhook_url, task_id, "clone_repository",
+                f"Failed to clone repository: {clone_result.stderr}",
+                ProjectInitStatus.FAILED,
+                error=clone_result.stderr
             )
-
+            return
+            
         logger.info(f"Cloned repository: {request.github_repo_url} to {project_path}")
-
-        # Create and checkout new branch
-        branch_result = create_git_branch(project_path, request.project_name)
-
-        if branch_result.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create branch: {branch_result.stderr}",
-            )
-
-        logger.info(f"Created and checked out branch: {request.project_name}")
-
-        # Create mcp-servers.json if MCP servers were provided
-        if request.mcp_servers:
-            approval_server_path = Path(__file__).parent.parent.parent / "mcp_approval_webhook_server.py"
-            create_mcp_config_for_project(project_path, request.mcp_servers, approval_server_path)
-
-        # Handle AI instruction files
-        ai_files_created = []
+        
+        await send_project_init_webhook(
+            webhook_url, task_id, "clone_repository",
+            "Repository cloned successfully",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        # Step 3: Setup MCP servers
+        await send_project_init_webhook(
+            webhook_url, task_id, "setup_mcp",
+            "Setting up MCP servers configuration...",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        mcp_servers = request.mcp_servers or []
+        approval_server_path = Path(__file__).parent.parent.parent / "mcp_approval_webhook_server.py"
+        
+        create_mcp_config_for_project(project_path, mcp_servers, Path("mcp_approval_webhook_server.py"))
+        
+        copy_success = copy_mcp_approval_server(project_path, approval_server_path)
+        if not copy_success:
+            logger.warning("Failed to copy MCP approval server, continuing...")
+            
+        await send_project_init_webhook(
+            webhook_url, task_id, "setup_mcp",
+            f"MCP configuration created with {len(mcp_servers)} servers",
+            ProjectInitStatus.IN_PROGRESS,
+            metadata={"mcp_servers": [s.server_type.value for s in mcp_servers]}
+        )
+        
+        # Step 4: Setup .claude directory
+        await send_project_init_webhook(
+            webhook_url, task_id, "setup_claude_directory",
+            "Setting up .claude directory with hooks and settings...",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        claude_setup_success = setup_claude_directory(project_path, webhook_url)
+        if not claude_setup_success:
+            logger.warning("Failed to setup .claude directory completely")
+            
+        await send_project_init_webhook(
+            webhook_url, task_id, "setup_claude_directory",
+            ".claude directory setup completed",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        # Step 5: Create slash commands
+        await send_project_init_webhook(
+            webhook_url, task_id, "create_slash_commands",
+            "Creating slash commands...",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        slash_commands_success = create_slash_commands(project_path)
+        if not slash_commands_success:
+            logger.warning("Failed to create slash commands")
+            
+        await send_project_init_webhook(
+            webhook_url, task_id, "create_slash_commands",
+            "Slash commands created successfully",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        # Step 6: Run Claude /init command
+        await send_project_init_webhook(
+            webhook_url, task_id, "claude_init",
+            "Running Claude /init command...",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
         claude_init_success = False
-
-        if request.ai_instruction_files:
-            ai_files = request.ai_instruction_files
-
-            # Create AI instruction files
-            if any(
-                [
-                    ai_files.create_ai_dos_and_donts,
-                    ai_files.create_ai_figma_to_code,
-                    ai_files.create_ai_coding_rules,
-                ]
-            ):
-                create_ai_instruction_files(project_path, ai_files)
-                if ai_files.create_ai_dos_and_donts:
-                    ai_files_created.append("AI_DOS_AND_DONTS.md")
-                if ai_files.create_ai_figma_to_code:
-                    ai_files_created.append("AI_FIGMA_TO_CODE.md")
-                if ai_files.create_ai_coding_rules:
-                    ai_files_created.append("AI_CODING_RULES.md")
-
-                logger.info(f"Created AI instruction files: {', '.join(ai_files_created)}")
-
-            # Run Claude /init command to create CLAUDE.md
-            if ai_files.create_claude_md:
-                claude_init_success = await run_claude_init_command(project_path)
-                if claude_init_success:
-                    ai_files_created.append("CLAUDE.md")
-                    logger.info("Successfully created CLAUDE.md using Claude Code SDK")
-                else:
-                    # Create a basic CLAUDE.md as fallback
-                    logger.warning("Creating basic CLAUDE.md template as fallback")
-                    create_basic_claude_md(project_path, request.project_name, request.github_repo_url)
-                    ai_files_created.append("CLAUDE.md")
-                    claude_init_success = True
-                    logger.info("Created basic CLAUDE.md template")
-
-            # Update CLAUDE.md with references to AI instruction files
-            if ai_files.update_claude_md and claude_init_success:
-                enhancement_success = await update_claude_md_with_references(project_path)
-                if enhancement_success:
-                    logger.info("Updated CLAUDE.md with AI instruction file references")
-                else:
-                    logger.warning("Failed to enhance CLAUDE.md with AI instruction file references")
-
-        # Run context manager initialization if context-manager is selected
-        context_manager_results = []
-        if request.mcp_servers and "context-manager" in request.mcp_servers:
-            # Load the mcp-servers.json from the project directory
+        try:
+            claude_init_success = await run_claude_init_command(project_path)
+            if claude_init_success:
+                logger.info("Successfully ran Claude /init command")
+            else:
+                logger.warning("Claude /init command did not complete successfully")
+        except Exception as e:
+            logger.error(f"Error running Claude /init: {e}")
+            
+        await send_project_init_webhook(
+            webhook_url, task_id, "claude_init",
+            "Claude /init command completed",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        # Step 7: Run default MCP commands
+        mcp_results = []
+        if mcp_servers:
+            await send_project_init_webhook(
+                webhook_url, task_id, "mcp_initialization",
+                "Running default MCP server commands...",
+                ProjectInitStatus.IN_PROGRESS
+            )
+            
             mcp_config_path = project_path / "mcp-servers.json"
             if mcp_config_path.exists():
                 with open(mcp_config_path, "r") as f:
-                    mcp_config = json.load(f)
-                mcp_servers = mcp_config.get("mcpServers", {})
-                context_manager_results = await run_context_manager_prompts(project_path, mcp_servers)
-
-        return {
-            "status": "success",
-            "message": f"Project initialized successfully",
-            "project_path": str(project_path),
-            "branch": request.project_name,
-            "mcp_servers_count": len(request.mcp_servers) + 1 if request.mcp_servers else 0,
-            "ai_files_created": ai_files_created,
-            "claude_init_success": claude_init_success,
-            "context_manager_results": context_manager_results,
-        }
-
-    except HTTPException:
-        raise
+                    full_mcp_config = json.load(f)
+                    full_mcp_servers = full_mcp_config.get("mcpServers", {})
+                    
+                mcp_results = await run_default_mcp_commands(
+                    project_path, 
+                    full_mcp_servers,
+                    webhook_url
+                )
+                
+            await send_project_init_webhook(
+                webhook_url, task_id, "mcp_initialization",
+                f"MCP initialization completed: {len([r for r in mcp_results if r.get('success')])} succeeded",
+                ProjectInitStatus.IN_PROGRESS,
+                metadata={"mcp_results": mcp_results}
+            )
+        
+        # Final success webhook
+        await send_project_init_webhook(
+            webhook_url, task_id, "initialization_complete",
+            "Project initialization completed successfully",
+            ProjectInitStatus.COMPLETED,
+            metadata={
+                "organization": request.organization_name,
+                "project_path": str(project_path),
+                "mcp_servers_count": len(mcp_servers) + 1,
+                "mcp_servers_enabled": [s.server_type.value for s in mcp_servers],
+                "setup_results": {
+                    "mcp_approval_copied": copy_success,
+                    "claude_directory_setup": claude_setup_success,
+                    "slash_commands_created": slash_commands_success,
+                    "claude_init_success": claude_init_success,
+                },
+                "mcp_initialization_results": mcp_results
+            }
+        )
+        
+        logger.info(f"Project initialization completed successfully for task {task_id}")
+        
     except Exception as e:
         logger.error(f"Failed to initialize project: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        await send_project_init_webhook(
+            webhook_url, task_id, "initialization_failed",
+            f"Project initialization failed: {str(e)}",
+            ProjectInitStatus.FAILED,
+            error=str(e)
+        )
+
+
+@router.post("/init-project", response_model=InitProjectResponse)
+async def init_project(request: InitProjectRequest, background_tasks: BackgroundTasks):
+    """Initialize a new project by cloning a repository with full Claude setup.
+    
+    Returns task_id immediately and processes initialization in background.
+    Sends webhook notifications for each step of the process.
+    """
+    task_id = str(uuid4())
+    
+    logger.info(
+        f"New project initialization request - Task: {task_id}, "
+        f"Org: {request.organization_name}, Project: {request.project_path}"
+    )
+    
+    # Add initialization to background tasks
+    background_tasks.add_task(
+        init_project_background,
+        task_id=task_id,
+        request=request,
+    )
+    
+    return InitProjectResponse(
+        task_id=task_id,
+        status="accepted",
+        message="Project initialization started"
+    )
