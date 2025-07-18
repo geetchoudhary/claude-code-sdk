@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -376,75 +377,6 @@ Please update this section with relevant build, test, and deployment commands fo
         f.write(basic_claude_md)
 
 
-async def run_context_manager_prompts(
-    project_path: Path, mcp_servers: Dict[str, Any]
-) -> List[Dict[str, Any]]:
-    """Run context manager initialization prompts."""
-    context_manager_results = []
-
-    try:
-        logger.info("Running context manager initialization prompts...")
-
-        # Import process_query function
-        from app.core.query_processor import ClaudeQueryProcessor
-
-        query_processor = ClaudeQueryProcessor()
-
-        # Run the 3 context manager prompts
-        context_prompts = [
-            "use context manager mcp and Use setup_context for the current directory",
-            "use context manager mcp and Use update_context for the current directory",
-            "use context manager mcp and Use persist_context for the current directory",
-        ]
-
-        for i, prompt in enumerate(context_prompts, 1):
-            try:
-                logger.info(f"Running context manager prompt {i}: {prompt}")
-                # Generate task ID for this context manager prompt
-                task_id = str(uuid4())
-                await query_processor.process_query_with_retry(
-                    task_id=task_id,
-                    prompt=prompt,
-                    webhook_url="http://localhost:8002/webhook",  # Use standard webhook URL
-                    session_id=None,
-                    conversation_id=None,
-                    options={
-                        "cwd": str(project_path),
-                        "permission_mode": "interactive",  # Use interactive mode to enable MCP
-                        "allowed_tools": [
-                            "mcp__context-manager",
-                            "Read",
-                            "Write",
-                            "LS",
-                            "Edit",
-                            "MultiEdit",
-                        ],
-                        "mcp_servers": mcp_servers,
-                    },
-                )
-                context_manager_results.append(
-                    {"prompt": prompt, "success": True, "result": "Completed successfully"}
-                )
-                logger.info(f"Context manager prompt {i} completed successfully")
-            except Exception as e:
-                logger.error(f"Context manager prompt {i} failed: {e}")
-                context_manager_results.append(
-                    {"prompt": prompt, "success": False, "error": str(e)}
-                )
-
-        logger.info(
-            f"Context manager initialization completed: {len([r for r in context_manager_results if r['success']])}/3 prompts succeeded"
-        )
-
-    except Exception as e:
-        logger.error(f"Context manager initialization failed: {e}")
-        context_manager_results.append(
-            {"error": f"Context manager initialization failed: {e}", "success": False}
-        )
-
-    return context_manager_results
-
-
 def clone_repository(repo_url: str, target_path: Path) -> subprocess.CompletedProcess:
     """Clone a git repository to the specified path."""
     clone_cmd = ["git", "clone", repo_url, str(target_path)]
@@ -455,6 +387,47 @@ def create_git_branch(project_path: Path, branch_name: str) -> subprocess.Comple
     """Create and checkout a new git branch."""
     branch_cmd = ["git", "checkout", "-b", branch_name]
     return subprocess.run(branch_cmd, cwd=str(project_path), capture_output=True, text=True)
+
+
+def checkout_new_branch(project_path: Path, branch_name: str) -> Dict[str, Any]:
+    """Create and checkout a new git branch.
+    
+    Args:
+        project_path: Project directory path
+        branch_name: Name of the new branch to create
+        
+    Returns:
+        Dict with success status and metadata
+    """
+    try:
+        checkout_result = subprocess.run(
+            ["git", "checkout", "-b", branch_name],
+            cwd=project_path,
+            capture_output=True,
+            text=True
+        )
+        
+        if checkout_result.returncode != 0:
+            logger.warning(f"Failed to create branch: {checkout_result.stderr}")
+            return {
+                "success": False,
+                "error": checkout_result.stderr,
+                "branch_name": branch_name
+            }
+        else:
+            logger.info(f"Successfully created and checked out branch: {branch_name}")
+            return {
+                "success": True,
+                "branch_name": branch_name
+            }
+            
+    except Exception as e:
+        logger.error(f"Error during branch checkout: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "branch_name": branch_name
+        }
 
 
 def create_mcp_config_for_project(
@@ -583,7 +556,6 @@ def setup_claude_directory(project_path: Path, webhook_url: str) -> bool:
         bool: True if successful, False otherwise
     """
     try:
-        import shutil
         
         # Get resources directory
         resources_dir = settings.project_root / "resources"
@@ -827,14 +799,6 @@ async def run_default_mcp_commands(
                 "use context manager mcp and Use persist_context for the current directory"
             ])
             
-        # Add github specific commands if present
-        if "github" in mcp_servers:
-            default_commands.append("use github mcp to list repositories")
-            
-        # Add figma specific commands if present
-        if "figma" in mcp_servers:
-            default_commands.append("use figma mcp to list available files")
-            
         # Run each command
         for i, command in enumerate(default_commands, 1):
             try:
@@ -852,8 +816,6 @@ async def run_default_mcp_commands(
                         "permission_mode": "interactive",
                         "allowed_tools": [
                             "mcp__context-manager",
-                            "mcp__github", 
-                            "mcp__figma",
                             "Read", "Write", "LS"
                         ],
                         "mcp_servers": mcp_servers,
@@ -889,3 +851,103 @@ async def run_default_mcp_commands(
         })
         
     return results
+
+
+def copy_default_ai_files(project_path: Path) -> Dict[str, Any]:
+    """Copy default AI instruction files from resources directory.
+    
+    Args:
+        project_path: Project directory path
+        
+    Returns:
+        Dict with copy results and metadata
+    """
+    ai_files_copied = 0
+    ai_files_failed = []
+    
+    # Define the AI instruction files to copy
+    ai_instruction_files = [
+        "AI_DOS_AND_DONTS.md",
+        "ai-coding-rules.md", 
+        "ai-figma-code.md"
+    ]
+    
+    try:
+        resources_dir = Path(__file__).parent.parent.parent / "resources"
+        
+        for filename in ai_instruction_files:
+            source_file = resources_dir / filename
+            dest_file = project_path / "resources" / filename
+            
+            try:
+                if source_file.exists():
+                    shutil.copy2(source_file, dest_file)
+                    ai_files_copied += 1
+                    logger.info(f"Copied {filename} to project directory")
+                else:
+                    ai_files_failed.append(f"{filename} (source not found)")
+                    logger.warning(f"Source file not found: {source_file}")
+            except Exception as e:
+                ai_files_failed.append(f"{filename} ({str(e)})")
+                logger.error(f"Failed to copy {filename}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Error setting up AI instruction files: {e}")
+        ai_files_failed.append(f"General error: {str(e)}")
+        
+    return {
+        "files_copied": ai_files_copied,
+        "files_failed": ai_files_failed,
+        "total_files": len(ai_instruction_files),
+        "success": ai_files_copied > 0
+    }
+
+
+async def run_claude_init_with_query_processor(
+    project_path: Path, 
+    task_id: str,
+    webhook_url: str
+) -> Dict[str, Any]:
+    """Run Claude /init command using the query processor.
+    
+    Args:
+        project_path: Project directory path
+        task_id: Task ID for the operation
+        webhook_url: Webhook URL for notifications
+        
+    Returns:
+        Dict with success status and metadata
+    """
+    try:
+        from app.core.query_processor import ClaudeQueryProcessor
+        query_processor = ClaudeQueryProcessor()
+        
+        await query_processor.process_query_with_retry(
+            task_id=task_id,
+            prompt="/init",
+            webhook_url=webhook_url,
+            session_id=None,
+            conversation_id=None,
+            options={
+                "cwd": str(project_path),
+                "permission_mode": "bypassPermissions",
+                "system_prompt": "Write a claude.md file quickly in one line, don't use any other tools",
+                "allowed_tools": ["Read", "Write", "LS", "Edit", "MultiEdit"],
+                "max_turns": 16
+            },
+            timeout=300  # 5 minute timeout for init
+        )
+        
+        logger.info("Successfully ran Claude /init command")
+        return {
+            "success": True,
+            "task_id": task_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error running Claude /init: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "task_id": task_id
+        }

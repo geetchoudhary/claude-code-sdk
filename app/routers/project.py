@@ -11,11 +11,13 @@ import structlog
 from app.config import settings
 from app.models import InitProjectRequest, InitProjectResponse, ProjectInitStatus
 from app.services.project_utils import (
+    checkout_new_branch,
     clone_repository,
+    copy_default_ai_files,
     copy_mcp_approval_server,
     create_mcp_config_for_project,
     create_slash_commands,
-    run_claude_init_command,
+    run_claude_init_with_query_processor,
     run_default_mcp_commands,
     setup_claude_directory,
 )
@@ -94,7 +96,31 @@ async def init_project_background(
             ProjectInitStatus.IN_PROGRESS
         )
         
-        # Step 3: Setup MCP servers
+        # Step 3: Checkout new branch
+        await send_project_init_webhook(
+            webhook_url, task_id, "checkout_branch",
+            f"Creating and checking out new branch: {request.project_path}...",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        branch_result = checkout_new_branch(project_path, request.project_path)
+        
+        if branch_result["success"]:
+            await send_project_init_webhook(
+                webhook_url, task_id, "checkout_branch",
+                f"Successfully checked out new branch: {request.project_path}",
+                ProjectInitStatus.IN_PROGRESS,
+                metadata={"branch_name": branch_result["branch_name"]}
+            )
+        else:
+            await send_project_init_webhook(
+                webhook_url, task_id, "checkout_branch",
+                f"Warning: Failed to create branch: {branch_result.get('error', 'Unknown error')}",
+                ProjectInitStatus.IN_PROGRESS,
+                metadata={"branch_creation_failed": True, "error": branch_result.get('error')}
+            )
+        
+        # Step 4: Setup MCP servers
         await send_project_init_webhook(
             webhook_url, task_id, "setup_mcp",
             "Setting up MCP servers configuration...",
@@ -134,7 +160,7 @@ async def init_project_background(
             ProjectInitStatus.IN_PROGRESS
         )
         
-        # Step 5: Create slash commands
+        # Step 6: Create slash commands
         await send_project_init_webhook(
             webhook_url, task_id, "create_slash_commands",
             "Creating slash commands...",
@@ -151,30 +177,41 @@ async def init_project_background(
             ProjectInitStatus.IN_PROGRESS
         )
         
-        # Step 6: Run Claude /init command
+        # Step 7: Copy default AI instruction files
+        await send_project_init_webhook(
+            webhook_url, task_id, "copy_ai_files",
+            "Copying default AI instruction files...",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        ai_files_result = copy_default_ai_files(project_path)
+        
+        await send_project_init_webhook(
+            webhook_url, task_id, "copy_ai_files",
+            f"AI instruction files copied: {ai_files_result['files_copied']}/{ai_files_result['total_files']} succeeded",
+            ProjectInitStatus.IN_PROGRESS,
+            metadata=ai_files_result
+        )
+        
+        # Step 8: Run Claude /init command
         await send_project_init_webhook(
             webhook_url, task_id, "claude_init",
             "Running Claude /init command...",
             ProjectInitStatus.IN_PROGRESS
         )
         
-        claude_init_success = False
-        try:
-            claude_init_success = await run_claude_init_command(project_path)
-            if claude_init_success:
-                logger.info("Successfully ran Claude /init command")
-            else:
-                logger.warning("Claude /init command did not complete successfully")
-        except Exception as e:
-            logger.error(f"Error running Claude /init: {e}")
-            
-        await send_project_init_webhook(
-            webhook_url, task_id, "claude_init",
-            "Claude /init command completed",
-            ProjectInitStatus.IN_PROGRESS
+        claude_init_result = await run_claude_init_with_query_processor(
+            project_path, task_id, webhook_url
         )
         
-        # Step 7: Run default MCP commands
+        await send_project_init_webhook(
+            webhook_url, task_id, "claude_init",
+            "Claude /init command completed" if claude_init_result["success"] else "Claude /init command failed",
+            ProjectInitStatus.IN_PROGRESS,
+            metadata=claude_init_result
+        )
+        
+        # Step 9: Run default MCP commands
         mcp_results = []
         if mcp_servers:
             await send_project_init_webhook(
@@ -183,17 +220,17 @@ async def init_project_background(
                 ProjectInitStatus.IN_PROGRESS
             )
             
-            mcp_config_path = project_path / "mcp-servers.json"
-            if mcp_config_path.exists():
-                with open(mcp_config_path, "r") as f:
-                    full_mcp_config = json.load(f)
-                    full_mcp_servers = full_mcp_config.get("mcpServers", {})
+            # mcp_config_path = project_path / "mcp-servers.json"
+            # if mcp_config_path.exists():
+            #     with open(mcp_config_path, "r") as f:
+            #         full_mcp_config = json.load(f)
+            #         full_mcp_servers = full_mcp_config.get("mcpServers", {})
                     
-                mcp_results = await run_default_mcp_commands(
-                    project_path, 
-                    full_mcp_servers,
-                    webhook_url
-                )
+            #     mcp_results = await run_default_mcp_commands(
+            #         project_path, 
+            #         full_mcp_servers,
+            #         webhook_url
+            #     )
                 
             await send_project_init_webhook(
                 webhook_url, task_id, "mcp_initialization",
@@ -216,9 +253,11 @@ async def init_project_background(
                     "mcp_approval_copied": copy_success,
                     "claude_directory_setup": claude_setup_success,
                     "slash_commands_created": slash_commands_success,
-                    "claude_init_success": claude_init_success,
+                    "branch_checkout_success": branch_result["success"],
+                    "ai_files_copied": ai_files_result["files_copied"],
+                    "claude_init_success": claude_init_result["success"],
                 },
-                "mcp_initialization_results": mcp_results
+                # "mcp_initialization_results": mcp_results
             }
         )
         
