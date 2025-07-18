@@ -875,6 +875,11 @@ def copy_default_ai_files(project_path: Path) -> Dict[str, Any]:
     try:
         resources_dir = Path(__file__).parent.parent.parent / "resources"
         
+        # Create resources directory in the project if it doesn't exist
+        project_resources_dir = project_path / "resources"
+        project_resources_dir.mkdir(exist_ok=True)
+        logger.info(f"Created resources directory at {project_resources_dir}")
+        
         for filename in ai_instruction_files:
             source_file = resources_dir / filename
             dest_file = project_path / "resources" / filename
