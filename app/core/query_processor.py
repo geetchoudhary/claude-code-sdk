@@ -136,11 +136,6 @@ from app.models import WebhookPayload
 from app.services.mcp_integration import get_mcp_config
 from app.services.webhook_utils import send_webhook
 
-from app.logging_config import setup_logging
-
-# Setup logging
-logger = setup_logging()
-
 class ClaudeQueryProcessor:
     """Handles Claude query processing with proper error handling and session management."""
 
@@ -328,7 +323,7 @@ class ClaudeQueryProcessor:
         options: Optional[Dict[str, Any]] = None,
     ):
         """Internal query processing with structured error handling."""
-        logger.info(
+        self.logger.info(
             "Starting query processing",
             task_id=task_id,
             session_id=session_id,
@@ -513,10 +508,10 @@ class ClaudeQueryProcessor:
         messages = []
         result_session_id = session_id
         final_result = None
-        logger.info(f"Prompt from _execute_claude_query: {prompt}")
+        self.logger.info(f"Prompt from _execute_claude_query: {prompt}")
         
         async for message in query(prompt=prompt, options=claude_options):
-            logger.info(f"Message: {message}")
+            self.logger.info(f"Message: {message}")
             
             # Send webhook for all message types
             await self._send_message_webhook(
@@ -529,7 +524,7 @@ class ClaudeQueryProcessor:
                         if isinstance(block, TextBlock):
                             messages.append(block.text)
                             self.query_monitor.record_message_received(task_id)
-                            logger.info(
+                            self.logger.info(
                                 "Received message chunk",
                                 task_id=task_id,
                                 chunk_length=len(block.text),

@@ -263,9 +263,9 @@ async def init_project_background(
                     "slash_commands_created": slash_commands_success,
                     "branch_checkout_success": branch_result["success"],
                     "ai_files_copied": ai_files_result["files_copied"],
-                    # "claude_init_success": claude_init_result["success"],
+                    "claude_init_success": claude_init_result["success"],
                 },
-                # "mcp_initialization_results": mcp_results
+                "mcp_initialization_results": mcp_results
             }
         )
         
