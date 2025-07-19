@@ -17,13 +17,19 @@ import aiohttp
 from aiohttp import web
 import threading
 
+# Add the parent directory to sys.path to import app.config
+sys.path.append(str(Path(__file__).parent))
+from app.config import settings
+
 # Create MCP server
 mcp = FastMCP("approval-server")
 
-# Configuration
-WEBHOOK_URL = "http://localhost:8002/approval-request"
-CALLBACK_PORT = 8083
-APPROVAL_TIMEOUT = 300  # 5 minutes
+# Configuration from settings
+WEBHOOK_URL = settings.approval_webhook_url
+CALLBACK_HOST = settings.approval_callback_host
+# Use a dynamic port based on process ID to avoid conflicts
+CALLBACK_PORT = settings.approval_callback_port_base + (os.getpid() % 1000)
+APPROVAL_TIMEOUT = settings.approval_timeout
 
 # Store pending approvals
 pending_approvals: Dict[str, dict] = {}
@@ -101,7 +107,7 @@ async def send_webhook_notification(request_id: str, tool_name: str, tool_input:
         "timestamp": datetime.datetime.now().isoformat(),
         "tool_name": tool_name,
         "tool_input": tool_input,
-        "callback_url": f"http://localhost:{CALLBACK_PORT}/approval-callback"
+        "callback_url": f"http://{CALLBACK_HOST}:{CALLBACK_PORT}/approval-callback"
     }
     
     # Add context for better UI display
@@ -199,7 +205,7 @@ async def permissions__approve(tool_name: str, input: dict, reason: str = "") ->
     
     # Send webhook notification
     print(f"\n⚠️  APPROVAL NEEDED for {tool_name}", file=sys.stderr)
-    print(f"Sending webhook notification to port 8082...", file=sys.stderr)
+    print(f"Sending webhook notification to {WEBHOOK_URL}...", file=sys.stderr)
     
     await send_webhook_notification(request_id, tool_name, input)
     

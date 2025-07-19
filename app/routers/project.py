@@ -202,22 +202,22 @@ async def init_project_background(
         )
         
         # Step 8: Run Claude /init command
-        # await send_project_init_webhook(
-        #     webhook_url, task_id, "claude_init",
-        #     "Running Claude /init command...",
-        #     ProjectInitStatus.IN_PROGRESS
-        # )
+        await send_project_init_webhook(
+            webhook_url, task_id, "claude_init",
+            "Running Claude /init command...",
+            ProjectInitStatus.IN_PROGRESS
+        )
         
-        # claude_init_result = await run_claude_init_with_query_processor(
-        #     project_path, task_id, webhook_url
-        # )
+        claude_init_result = await run_claude_init_with_query_processor(
+            project_path, task_id, webhook_url
+        )
         
-        # await send_project_init_webhook(
-        #     webhook_url, task_id, "claude_init",
-        #     "Claude /init command completed" if claude_init_result["success"] else "Claude /init command failed",
-        #     ProjectInitStatus.IN_PROGRESS,
-        #     metadata=claude_init_result
-        # )
+        await send_project_init_webhook(
+            webhook_url, task_id, "claude_init",
+            "Claude /init command completed" if claude_init_result["success"] else "Claude /init command failed",
+            ProjectInitStatus.IN_PROGRESS,
+            metadata=claude_init_result
+        )
         
         # Step 9: Run default MCP commands
         mcp_results = []
@@ -228,17 +228,17 @@ async def init_project_background(
                 ProjectInitStatus.IN_PROGRESS
             )
             
-            # mcp_config_path = project_path / "mcp-servers.json"
-            # if mcp_config_path.exists():
-            #     with open(mcp_config_path, "r") as f:
-            #         full_mcp_config = json.load(f)
-            #         full_mcp_servers = full_mcp_config.get("mcpServers", {})
+            mcp_config_path = project_path / "mcp-servers.json"
+            if mcp_config_path.exists():
+                with open(mcp_config_path, "r") as f:
+                    full_mcp_config = json.load(f)
+                    full_mcp_servers = full_mcp_config.get("mcpServers", {})
                     
-            #     mcp_results = await run_default_mcp_commands(
-            #         project_path, 
-            #         full_mcp_servers,
-            #         webhook_url
-            #     )
+                mcp_results = await run_default_mcp_commands(
+                    project_path, 
+                    full_mcp_servers,
+                    webhook_url
+                )
                 
             await send_project_init_webhook(
                 webhook_url, task_id, "mcp_initialization",
@@ -263,9 +263,9 @@ async def init_project_background(
                     "slash_commands_created": slash_commands_success,
                     "branch_checkout_success": branch_result["success"],
                     "ai_files_copied": ai_files_result["files_copied"],
-                    # "claude_init_success": claude_init_result["success"],
+                    "claude_init_success": claude_init_result["success"],
                 },
-                # "mcp_initialization_results": mcp_results
+                "mcp_initialization_results": mcp_results
             }
         )
         

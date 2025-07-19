@@ -37,9 +37,24 @@ class WebhookPayload(BaseModel):
     task_id: str
     session_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    type: str = "status"  # "status", "query", "error"
     status: str
     result: Optional[str] = None
     error: Optional[str] = None
+    message_type: Optional[str] = None  # "UserMessage", "AssistantMessage", etc.
+    content_type: Optional[str] = None  # "text", "tool_use", "tool_result", etc.
+    tool_name: Optional[str] = None  # For tool use blocks
+    tool_input: Optional[Dict[str, Any]] = None  # For tool use blocks
+    
+    # ResultMessage specific fields
+    subtype: Optional[str] = None  # "success", "error", etc.
+    duration_ms: Optional[int] = None
+    duration_api_ms: Optional[int] = None
+    is_error: Optional[bool] = None
+    num_turns: Optional[int] = None
+    total_cost_usd: Optional[float] = None
+    usage: Optional[Dict[str, Any]] = None  # Token usage and other metrics
+    
     timestamp: datetime
 
 
