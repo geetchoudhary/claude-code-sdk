@@ -77,6 +77,14 @@
             display: none; /* Chrome, Safari and Opera */
         }
         
+        /* Global placeholder styling for single-line with ellipsis */
+        textarea::placeholder {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+        
         /* Hide scrollbars for any element with custom scrolling */
         .scrollable, 
         *[style*="overflow-y: auto"], 
@@ -252,6 +260,9 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         
         .session-content-direct {
@@ -289,6 +300,9 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         
         .message {
@@ -577,6 +591,14 @@
         /* Hide scrollbar for Chrome, Safari and Opera */
         .card-input-wrapper textarea::-webkit-scrollbar {
             display: none;
+        }
+        
+        /* Card input placeholder styling */
+        .card-input-wrapper textarea::placeholder {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #9ca3af;
         }
         
         .card-input-wrapper button {
