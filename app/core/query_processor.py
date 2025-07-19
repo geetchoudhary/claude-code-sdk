@@ -1,4 +1,113 @@
-"""Main query processing logic with Claude SDK integration."""
+"""Main query processing logic with Claude SDK integration.
+
+WEBHOOK FORMAT SPECIFICATION:
+
+All webhooks now include a `type` field to categorize the webhook:
+
+1. STATUS WEBHOOKS (type: "status"):
+   - user_message: Initial prompt submission
+   - completed: Final result
+   - failed: Error occurred
+   
+2. QUERY WEBHOOKS (type: "query"):
+   - All intermediate steps during Claude conversation
+   - Includes detailed message parsing
+   
+3. ERROR WEBHOOKS (type: "error"):
+   - Processing errors with detailed error information
+
+Standard Webhook Payload Structure:
+{
+    "task_id": "string",
+    "session_id": "string|null",
+    "conversation_id": "string|null", 
+    "type": "status|query|error",
+    "status": "string",
+    "result": "string|null",
+    "error": "string|null",
+    "message_type": "string|null",      // "AssistantMessage", "UserMessage", "ResultMessage", etc.
+    "content_type": "string|null",      // "text", "tool_use", "tool_result", "result", etc.
+    "tool_name": "string|null",         // Tool name for tool_use blocks
+    "tool_input": "object|null",        // Tool input parameters
+    
+    // ResultMessage specific fields (only present for ResultMessage types)
+    "subtype": "string|null",           // "success", "error", etc.
+    "duration_ms": "number|null",       // Total execution duration
+    "duration_api_ms": "number|null",   // API call duration  
+    "is_error": "boolean|null",         // Whether result indicates error
+    "num_turns": "number|null",         // Number of conversation turns
+    "total_cost_usd": "number|null",    // Total cost in USD
+    "usage": "object|null",             // Token usage and metrics
+    
+    "timestamp": "datetime"
+}
+
+Example Query Webhook (tool use):
+{
+    "task_id": "abc123",
+    "session_id": "session456", 
+    "type": "query",
+    "status": "processing",
+    "message_type": "AssistantMessage",
+    "content_type": "tool_use",
+    "tool_name": "Bash",
+    "tool_input": {"command": "git diff"},
+    "result": "Tool: Bash",
+    "timestamp": "2025-01-01T12:00:00Z"
+}
+
+Example Query Webhook (tool result):
+{
+    "task_id": "abc123",
+    "session_id": "session456",
+    "type": "query", 
+    "status": "processing",
+    "message_type": "UserMessage",
+    "content_type": "tool_result",
+    "result": "diff output...",
+    "timestamp": "2025-01-01T12:00:01Z"
+}
+
+Example Query Webhook (text response):
+{
+    "task_id": "abc123",
+    "session_id": "session456",
+    "type": "query",
+    "status": "processing", 
+    "message_type": "AssistantMessage",
+    "content_type": "text",
+    "result": "Removed the scroll indicator component...",
+    "timestamp": "2025-01-01T12:00:02Z"
+}
+
+Example Query Webhook (result message with metrics):
+{
+    "task_id": "abc123",
+    "session_id": "2c3f3da1-3ad9-43e1-a669-6991227c25f6",
+    "type": "query",
+    "status": "processing",
+    "message_type": "ResultMessage", 
+    "content_type": "result",
+    "result": "Removed the scroll indicator component. Want me to commit these changes?",
+    "subtype": "success",
+    "duration_ms": 5371,
+    "duration_api_ms": 8690,
+    "is_error": false,
+    "num_turns": 32,
+    "total_cost_usd": 0.09051405,
+    "usage": {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 21649,
+        "cache_read_input_tokens": 20785,
+        "output_tokens": 100,
+        "server_tool_use": {
+            "web_search_requests": 0
+        },
+        "service_tier": "standard"
+    },
+    "timestamp": "2025-01-01T12:00:03Z"
+}
+"""
 
 import asyncio
 from datetime import datetime
@@ -14,6 +123,8 @@ from claude_code_sdk import (
     ProcessError,
     ResultMessage,
     TextBlock,
+    ToolUseBlock,
+    UserMessage,
     query,
 )
 
@@ -25,6 +136,10 @@ from app.models import WebhookPayload
 from app.services.mcp_integration import get_mcp_config
 from app.services.webhook_utils import send_webhook
 
+from app.logging_config import setup_logging
+
+# Setup logging
+logger = setup_logging()
 
 class ClaudeQueryProcessor:
     """Handles Claude query processing with proper error handling and session management."""
@@ -213,7 +328,7 @@ class ClaudeQueryProcessor:
         options: Optional[Dict[str, Any]] = None,
     ):
         """Internal query processing with structured error handling."""
-        self.logger.info(
+        logger.info(
             "Starting query processing",
             task_id=task_id,
             session_id=session_id,
@@ -229,6 +344,7 @@ class ClaudeQueryProcessor:
                     task_id=task_id,
                     session_id=session_id,
                     conversation_id=conversation_id,
+                    type="status",
                     status="user_message",
                     result=prompt,
                     timestamp=datetime.utcnow(),
@@ -251,6 +367,7 @@ class ClaudeQueryProcessor:
                     task_id=task_id,
                     session_id=result_session_id,
                     conversation_id=conversation_id,
+                    type="status",
                     status="completed",
                     result=result_text,
                     timestamp=datetime.utcnow(),
@@ -396,32 +513,26 @@ class ClaudeQueryProcessor:
         messages = []
         result_session_id = session_id
         final_result = None
-
+        logger.info(f"Prompt from _execute_claude_query: {prompt}")
+        
         async for message in query(prompt=prompt, options=claude_options):
+            logger.info(f"Message: {message}")
+            
+            # Send webhook for all message types
+            await self._send_message_webhook(
+                webhook_url, task_id, result_session_id, conversation_id, message
+            )
+            
             if isinstance(message, Message):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
                             messages.append(block.text)
                             self.query_monitor.record_message_received(task_id)
-                            self.logger.debug(
+                            logger.info(
                                 "Received message chunk",
                                 task_id=task_id,
                                 chunk_length=len(block.text),
-                            )
-
-                            # Send intermediate message chunk via webhook
-                            await send_webhook(
-                                webhook_url,
-                                WebhookPayload(
-                                    task_id=task_id,
-                                    session_id=result_session_id,
-                                    conversation_id=conversation_id,
-                                    status="processing",
-                                    result=block.text,
-                                    timestamp=datetime.utcnow(),
-                                ),
-                                self.query_monitor,
                             )
 
             # Capture session ID and final result from ResultMessage
@@ -445,6 +556,125 @@ class ClaudeQueryProcessor:
         result_text = final_result if final_result else "\n".join(messages)
         return result_session_id, result_text
 
+    async def _send_message_webhook(
+        self,
+        webhook_url: str,
+        task_id: str,
+        session_id: Optional[str],
+        conversation_id: Optional[str],
+        message: Any,
+    ):
+        """Send webhook for all message types with detailed information."""
+        message_type = type(message).__name__
+        
+        # Base payload
+        payload_data = {
+            "task_id": task_id,
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "type": "query",
+            "status": "processing",
+            "message_type": message_type,
+            "timestamp": datetime.utcnow(),
+        }
+        
+        # Handle different message types
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    await send_webhook(
+                        webhook_url,
+                        WebhookPayload(
+                            **payload_data,
+                            content_type="text",
+                            result=block.text,
+                        ),
+                        self.query_monitor,
+                    )
+                elif isinstance(block, ToolUseBlock):
+                    await send_webhook(
+                        webhook_url,
+                        WebhookPayload(
+                            **payload_data,
+                            content_type="tool_use",
+                            tool_name=block.name,
+                            tool_input=block.input,
+                            result=f"Tool: {block.name}",
+                        ),
+                        self.query_monitor,
+                    )
+                    
+        elif isinstance(message, UserMessage):
+            for content_item in message.content:
+                if isinstance(content_item, dict):
+                    # Handle tool results
+                    if content_item.get("type") == "tool_result":
+                        tool_use_id = content_item.get("tool_use_id", "")
+                        tool_content = content_item.get("content", "")
+                        is_error = content_item.get("is_error", False)
+                        
+                        await send_webhook(
+                            webhook_url,
+                            WebhookPayload(
+                                **payload_data,
+                                content_type="tool_result",
+                                result=str(tool_content),
+                                error=str(tool_content) if is_error else None,
+                            ),
+                            self.query_monitor,
+                        )
+                    else:
+                        # Handle other dict content
+                        await send_webhook(
+                            webhook_url,
+                            WebhookPayload(
+                                **payload_data,
+                                content_type="dict",
+                                result=str(content_item),
+                            ),
+                            self.query_monitor,
+                        )
+                else:
+                    # Handle string content
+                    await send_webhook(
+                        webhook_url,
+                        WebhookPayload(
+                            **payload_data,
+                            content_type="text",
+                            result=str(content_item),
+                        ),
+                        self.query_monitor,
+                    )
+                    
+        elif isinstance(message, ResultMessage):
+            await send_webhook(
+                webhook_url,
+                WebhookPayload(
+                    **payload_data,
+                    content_type="result",
+                    result=getattr(message, "result", None),
+                    subtype=getattr(message, "subtype", None),
+                    duration_ms=getattr(message, "duration_ms", None),
+                    duration_api_ms=getattr(message, "duration_api_ms", None),
+                    is_error=getattr(message, "is_error", None),
+                    num_turns=getattr(message, "num_turns", None),
+                    total_cost_usd=getattr(message, "total_cost_usd", None),
+                    usage=getattr(message, "usage", None),
+                ),
+                self.query_monitor,
+            )
+        else:
+            # Handle any other message types
+            await send_webhook(
+                webhook_url,
+                WebhookPayload(
+                    **payload_data,
+                    content_type="unknown",
+                    result=str(message),
+                ),
+                self.query_monitor,
+            )
+
     async def _send_error_webhook(
         self,
         webhook_url: str,
@@ -460,6 +690,7 @@ class ClaudeQueryProcessor:
                 task_id=task_id,
                 session_id=session_id,
                 conversation_id=conversation_id,
+                type="error",
                 status="failed",
                 error=error_msg,
                 timestamp=datetime.utcnow(),

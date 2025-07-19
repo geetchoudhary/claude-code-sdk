@@ -987,7 +987,7 @@ async def run_claude_init_with_query_processor(
                 "allowed_tools": ["Read", "Write", "LS", "Edit", "MultiEdit"],
                 "max_turns": 16
             },
-            timeout=300  # 5 minute timeout for init
+            timeout=600  # 5 minute timeout for init
         )
         
         logger.info("Successfully ran Claude /init command")
