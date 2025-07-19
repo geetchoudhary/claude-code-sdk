@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-PROJECT_ROOT = "/Users/mastergeet/Repos/claude_test"
+PROJECT_ROOT = "/home/ubuntu/projects/tgsd-ui"
 
 class QueryRequest(BaseModel):
     prompt: str
@@ -238,7 +238,7 @@ async def process_query(
         claude_options_dict = {
             'cwd': options.get('cwd', PROJECT_ROOT) if options else PROJECT_ROOT,
             'allowed_tools': options.get('allowed_tools', ["Read", "Write", "LS", "Task"]) if options else ["Read", "Write", "LS", "Task"],
-            'max_turns': options.get('max_turns', 8) if options else 8,
+            'max_turns': options.get('max_turns', 32) if options else 32,
             'resume': session_id  # Resume session if provided
         }
 
