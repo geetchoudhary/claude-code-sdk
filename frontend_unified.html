@@ -98,6 +98,7 @@
             display: flex;
             flex-direction: column;
             gap: 20px;
+            padding-bottom: 100px; /* Space for fixed input */
         }
         
         .section {
@@ -496,17 +497,9 @@
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
         
-        /* Input section for active card */
+        /* Input section - removed from cards */
         .card-input-section {
-            background: #f8f9fa;
-            border-top: 1px solid #e9ecef;
-            padding: 15px;
-            margin-top: 15px;
-            display: none;
-        }
-        
-        .message-card-wrapper.active .card-input-section {
-            display: block;
+            display: none !important; /* Hide all card inputs */
         }
         
         .card-input-wrapper {
@@ -940,13 +933,17 @@
             
             sessionsContainer.innerHTML = sessionIds.map(sessionId => {
                 const messages = messagesBySession[sessionId];
+                // Filter out processing messages
+                const filteredMessages = messages.filter(msg => 
+                    msg.message_type !== 'claude_processing' && msg.status !== 'processing'
+                );
                 
                 return `
                     <div class="session-content-direct" data-session-id="${sessionId}">
                         <div class="horizontal-cards-container" id="cards-container-${sessionId}">
-                            ${messages.slice().reverse().map((msg, index) => {
-                                const originalIndex = messages.length - 1 - index;
-                                return renderMessageCard(msg, messages, originalIndex, sessionId);
+                            ${filteredMessages.slice().reverse().map((msg, index) => {
+                                const originalIndex = filteredMessages.length - 1 - index;
+                                return renderMessageCard(msg, filteredMessages, originalIndex, sessionId);
                             }).join('')}
                         </div>
                     </div>
@@ -962,6 +959,14 @@
                     }, 100);
                 }
             });
+            
+            // Check if a new message was added (response received)
+            const currentMessageCount = Object.values(messagesBySession).reduce((acc, msgs) => acc + msgs.length, 0);
+            if (window.previousMessageCount && currentMessageCount > window.previousMessageCount) {
+                // Scroll to top when new message is received
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            window.previousMessageCount = currentMessageCount;
         }
         
         // Helper function to format message content with sections and bullet points
@@ -1099,23 +1104,8 @@
             const status = msg.status || 'unknown';
             const isLatestMessage = index === conversationMessages.length - 1;
             
-            // Add input section only to the latest message card
-            const inputSection = isLatestMessage ? `
-                <div class="card-input-section">
-                    <div class="card-input-wrapper">
-                        <textarea 
-                            id="card-input-${sessionId}-${index}" 
-                            placeholder="${getDynamicPlaceholder(msg, conversationMessages)}"
-                            rows="1"
-                            onkeydown="handleCardKeyDown(event, '${sessionId}')"
-                            oninput="autoResizeTextarea(this)"
-                        ></textarea>
-                        <button onclick="sendQueryFromCard('${sessionId}')">
-                            Send
-                        </button>
-                    </div>
-                </div>
-            ` : '';
+            // No input section in cards anymore
+            const inputSection = '';
             
             const cardContent = renderMessageWithInput(msg, conversationMessages, inputSection);
             
@@ -1206,7 +1196,11 @@
             const container = document.getElementById(`cards-container-${sessionId}`);
             const cards = container.querySelectorAll('.message-card-wrapper');
             const messages = messagesBySession[sessionId];
-            const reversedIndex = messages.length - 1 - index;
+            // Filter out processing messages
+            const filteredMessages = messages.filter(msg => 
+                msg.message_type !== 'claude_processing' && msg.status !== 'processing'
+            );
+            const reversedIndex = filteredMessages.length - 1 - index;
             const targetCard = cards[reversedIndex];
             
             if (targetCard) {
@@ -1243,7 +1237,11 @@
         
         async function sendQueryFromCard(sessionId) {
             const messages = messagesBySession[sessionId];
-            const latestIndex = messages.length - 1;
+            // Filter out processing messages to get correct index
+            const filteredMessages = messages.filter(msg => 
+                msg.message_type !== 'claude_processing' && msg.status !== 'processing'
+            );
+            const latestIndex = filteredMessages.length - 1;
             const input = document.getElementById(`card-input-${sessionId}-${latestIndex}`);
             const prompt = input ? input.value.trim() : '';
             
@@ -1252,7 +1250,9 @@
                 return;
             }
             
-            const latestSessionId = messages[latestIndex].session_id;
+            // Get the latest actual message (not processing) for session ID
+            const latestMessage = filteredMessages[latestIndex] || messages[messages.length - 1];
+            const latestSessionId = latestMessage.session_id;
             const permissionMode = sessionPermissionModes[sessionId] || 'bypassPermissions';
             
             try {
@@ -1270,6 +1270,7 @@
                 
                 if (response.ok) {
                     input.value = '';
+                    input.style.height = '40px'; // Reset height
                     showNotification('Query sent', 'success');
                     
                     // Track message sent
@@ -1278,6 +1279,9 @@
                         permission_mode: permissionMode,
                         message_length: prompt.length
                     });
+                    
+                    // Scroll to top after sending message
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
                 } else {
                     throw new Error('Failed to send query');
                 }
@@ -1523,6 +1527,7 @@
                 
                 if (response.ok) {
                     input.value = '';
+                    input.style.height = '39px'; // Reset height
                     showNotification('Query sent', 'success');
                     
                     // Track message sent
@@ -1531,6 +1536,9 @@
                         permission_mode: permissionMode,
                         message_length: prompt.length
                     });
+                    
+                    // Scroll to top after sending message
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
                 } else {
                     throw new Error('Failed to send query');
                 }
@@ -1739,16 +1747,8 @@
         }
         
         function countPendingQuestions() {
-            let pendingCount = 0;
-            
-            Object.values(messagesBySession).forEach(messages => {
-                const lastMessage = messages[messages.length - 1];
-                if (lastMessage && (lastMessage.status === 'processing' || lastMessage.message_type === 'claude_processing')) {
-                    pendingCount++;
-                }
-            });
-            
-            return pendingCount;
+            // Since we're hiding processing messages, we don't count them as pending
+            return 0;
         }
         
         function getCurrentQuestionContext() {
@@ -1845,6 +1845,140 @@
                 pollMessages();
             }
         });
+        
+        // Global input handling
+        function handleGlobalKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendGlobalMessage();
+            }
+        }
+        
+        async function sendGlobalMessage() {
+            const input = document.getElementById('globalInput');
+            const prompt = input ? input.value.trim() : '';
+            
+            if (!prompt) {
+                showNotification('Please enter a message', 'error');
+                return;
+            }
+            
+            // Get the latest session ID or create new one
+            const sessionIds = Object.keys(messagesBySession);
+            let targetSessionId = null;
+            let targetConversationId = null;
+            
+            if (sessionIds.length > 0) {
+                // Use the most recent session
+                const sortedSessions = sessionIds.sort((a, b) => {
+                    const aMessages = messagesBySession[a];
+                    const bMessages = messagesBySession[b];
+                    const aTime = new Date(aMessages[aMessages.length - 1].timestamp);
+                    const bTime = new Date(bMessages[bMessages.length - 1].timestamp);
+                    return bTime - aTime;
+                });
+                
+                targetSessionId = sortedSessions[0];
+                const messages = messagesBySession[targetSessionId];
+                const lastMessage = messages[messages.length - 1];
+                targetConversationId = lastMessage.session_id || lastMessage.conversation_id;
+            } else {
+                // Create new session
+                targetConversationId = 'session-' + Date.now();
+            }
+            
+            const permissionMode = sessionPermissionModes[targetSessionId] || 
+                                 document.getElementById('permissionMode').value;
+            
+            try {
+                const response = await fetch(`${API_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        conversation_id: targetConversationId,
+                        options: { permission_mode: permissionMode }
+                    })
+                });
+                
+                if (response.ok) {
+                    input.value = '';
+                    input.style.height = '40px'; // Reset height
+                    showNotification('Query sent', 'success');
+                    
+                    // Track message sent
+                    trackEvent('message_sent', {
+                        conversation_id: targetConversationId,
+                        permission_mode: permissionMode,
+                        message_length: prompt.length,
+                        source: 'global_input'
+                    });
+                    
+                    // Scroll to top after sending message
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                    throw new Error('Failed to send query');
+                }
+                
+            } catch (error) {
+                console.error('Error sending query:', error);
+                showNotification('Failed to send message', 'error');
+            }
+        }
+        
+        // Update fixed input placeholder based on context
+        function updateGlobalInputPlaceholder() {
+            const input = document.getElementById('globalInput');
+            if (!input) return;
+            
+            const sessionIds = Object.keys(messagesBySession);
+            if (sessionIds.length === 0) {
+                input.placeholder = "What are you building?";
+                return;
+            }
+            
+            // Get most recent session
+            const sortedSessions = sessionIds.sort((a, b) => {
+                const aMessages = messagesBySession[a];
+                const bMessages = messagesBySession[b];
+                const aTime = new Date(aMessages[aMessages.length - 1].timestamp);
+                const bTime = new Date(bMessages[bMessages.length - 1].timestamp);
+                return bTime - aTime;
+            });
+            
+            const latestSession = messagesBySession[sortedSessions[0]];
+            const filteredMessages = latestSession.filter(msg => 
+                msg.message_type !== 'claude_processing' && msg.status !== 'processing'
+            );
+            
+            if (filteredMessages.length > 0) {
+                const latestMessage = filteredMessages[filteredMessages.length - 1];
+                input.placeholder = getDynamicPlaceholder(latestMessage, filteredMessages);
+            }
+        }
+        
+        // Call this when messages update
+        const originalRenderSessions = renderSessions;
+        renderSessions = function() {
+            originalRenderSessions();
+            updateGlobalInputPlaceholder();
+        };
     </script>
+    
+    <!-- Fixed Input Container -->
+    <div class="fixed-input-container" id="fixedInputContainer">
+        <div class="fixed-input-wrapper">
+            <textarea 
+                id="globalInput" 
+                placeholder="Type your message..."
+                rows="1"
+                oninput="autoResizeTextarea(this)"
+                onkeydown="handleGlobalKeyDown(event)"
+            ></textarea>
+            <button onclick="sendGlobalMessage()">
+                Send
+            </button>
+        </div>
+    </div>
 </body>
 </html>
