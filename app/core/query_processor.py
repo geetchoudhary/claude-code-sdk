@@ -660,6 +660,7 @@ class ClaudeQueryProcessor:
             )
         else:
             # Handle any other message types
+            # TODO: Don't send if message is empty
             await send_webhook(
                 webhook_url,
                 WebhookPayload(

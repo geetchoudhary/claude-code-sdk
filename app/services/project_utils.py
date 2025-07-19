@@ -663,7 +663,7 @@ def setup_claude_directory(project_path: Path, webhook_url: str) -> bool:
 
 
 def create_slash_commands(project_path: Path) -> bool:
-    """Create slash commands directory and default commands.
+    """Copy slash commands from resources directory to project.
     
     Args:
         project_path: Project directory path
@@ -671,7 +671,13 @@ def create_slash_commands(project_path: Path) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
+    commands_copied = 0
+    commands_failed = []
+    
     try:
+        # Get resources/commands directory
+        resources_commands_dir = settings.project_root / "resources" / "commands"
+        
         # Create .claude/commands directory
         claude_dir = project_path / ".claude"
         claude_dir.mkdir(exist_ok=True)
@@ -679,134 +685,87 @@ def create_slash_commands(project_path: Path) -> bool:
         commands_dir = claude_dir / "commands"
         commands_dir.mkdir(exist_ok=True)
         
-        # Create default slash commands
-        commands = {
-            "lint.md": """# /lint
+        # Check if resources/commands exists
+        if not resources_commands_dir.exists() or not resources_commands_dir.is_dir():
+            logger.warning(f"Commands resources directory not found at {resources_commands_dir}")
+            # Create a basic command as fallback
+            basic_cmd = commands_dir / "help.md"
+            with open(basic_cmd, "w") as f:
+                f.write("""# /help
 
-Runs linting on the current project.
-
-## Usage
-```
-/lint [options]
-```
-
-## Options
-- `--fix`: Automatically fix linting errors where possible
-- `--format <formatter>`: Specify output format (default: stylish)
-
-## Examples
-```
-/lint
-/lint --fix
-/lint --format json
-```
-""",
-            "test.md": """# /test
-
-Runs tests for the current project.
+Get help with available commands.
 
 ## Usage
 ```
-/test [pattern] [options]
+/help
 ```
 
-## Options
-- `--coverage`: Generate coverage report
-- `--watch`: Run tests in watch mode
-- `--verbose`: Show detailed test output
-
-## Examples
-```
-/test
-/test user.test.js
-/test --coverage
-/test --watch
-```
-""",
-            "deploy.md": """# /deploy
-
-Deploy the project to the specified environment.
-
-## Usage
-```
-/deploy <environment> [options]
-```
-
-## Options
-- `--dry-run`: Show what would be deployed without actually deploying
-- `--force`: Force deployment even if checks fail
-- `--rollback`: Rollback to previous deployment
-
-## Examples
-```
-/deploy staging
-/deploy production --dry-run
-/deploy production --rollback
-```
-""",
-            "todo.md": """# /todo
-
-Manage project todos and tasks.
-
-## Usage
-```
-/todo <action> [args]
-```
-
-## Actions
-- `add <task>`: Add a new todo
-- `list`: List all todos
-- `complete <id>`: Mark todo as complete
-- `remove <id>`: Remove a todo
-
-## Examples
-```
-/todo add "Fix authentication bug"
-/todo list
-/todo complete 1
-/todo remove 2
-```
-"""
-        }
-        
-        # Write command files
-        for cmd_name, content in commands.items():
-            cmd_path = commands_dir / cmd_name
-            with open(cmd_path, "w") as f:
-                f.write(content)
-                
-        # Create commands index
-        index_content = {
-            "commands": [
-                {
-                    "name": "lint",
-                    "description": "Run linting on the project",
-                    "file": "lint.md"
-                },
-                {
-                    "name": "test",
-                    "description": "Run project tests",
-                    "file": "test.md"
-                },
-                {
-                    "name": "deploy",
-                    "description": "Deploy the project",
-                    "file": "deploy.md"
-                },
-                {
-                    "name": "todo",
-                    "description": "Manage project todos",
-                    "file": "todo.md"
-                }
-            ]
-        }
-        
-        index_path = commands_dir / "index.json"
-        with open(index_path, "w") as f:
-            json.dump(index_content, f, indent=2)
+This command shows available slash commands and their descriptions.
+""")
+            logger.info("Created basic help command as fallback")
+            return True
             
-        logger.info(f"Created slash commands in {commands_dir}")
-        return True
+        # Copy all command files from resources
+        command_files = list(resources_commands_dir.glob("*.md"))
+        
+        if not command_files:
+            logger.warning("No command files found in resources/commands")
+            return True
+            
+        for source_file in command_files:
+            try:
+                dest_file = commands_dir / source_file.name
+                shutil.copy2(source_file, dest_file)
+                commands_copied += 1
+                logger.info(f"Copied command file: {source_file.name}")
+            except Exception as e:
+                commands_failed.append(f"{source_file.name} ({str(e)})")
+                logger.error(f"Failed to copy {source_file.name}: {e}")
+                
+        # Create commands index based on copied files
+        index_commands = []
+        for cmd_file in commands_dir.glob("*.md"):
+            # Extract command name from filename (remove .md extension)
+            cmd_name = cmd_file.stem
+            
+            # Try to extract description from file content
+            description = f"Run {cmd_name} command"
+            try:
+                with open(cmd_file, "r") as f:
+                    lines = f.readlines()
+                    # Look for description in YAML frontmatter or first paragraph
+                    for i, line in enumerate(lines):
+                        if line.startswith("description:"):
+                            description = line.replace("description:", "").strip()
+                            break
+                        elif i > 0 and not line.startswith("#") and not line.startswith("---") and line.strip():
+                            # First non-header, non-frontmatter line
+                            description = line.strip()
+                            if len(description) > 100:
+                                description = description[:97] + "..."
+                            break
+            except Exception as e:
+                logger.warning(f"Could not extract description from {cmd_file.name}: {e}")
+                
+            index_commands.append({
+                "name": cmd_name,
+                "description": description,
+                "file": cmd_file.name
+            })
+            
+        # Write commands index
+        if index_commands:
+            index_path = commands_dir / "index.json"
+            with open(index_path, "w") as f:
+                json.dump({"commands": index_commands}, f, indent=2)
+            logger.info(f"Created commands index with {len(index_commands)} commands")
+            
+        logger.info(f"Copied {commands_copied} slash commands to {commands_dir}")
+        
+        if commands_failed:
+            logger.warning(f"Failed to copy {len(commands_failed)} commands: {commands_failed}")
+            
+        return commands_copied > 0 or not command_files  # Success if we copied something or there was nothing to copy
         
     except Exception as e:
         logger.error(f"Failed to create slash commands: {e}")

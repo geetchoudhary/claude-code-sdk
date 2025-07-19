@@ -168,20 +168,20 @@ async def init_project_background(
             metadata={"mcp_servers": [s.server_type.value for s in mcp_servers]}
         )
         
-        # Step 6: Create slash commands
+        # Step 6: Copy slash commands
         await send_project_init_webhook(
-            webhook_url, task_id, "create_slash_commands",
-            "Creating slash commands...",
+            webhook_url, task_id, "copy_slash_commands",
+            "Creating SuperClaude slash commands...",
             ProjectInitStatus.IN_PROGRESS
         )
         
         slash_commands_success = create_slash_commands(project_path)
         if not slash_commands_success:
-            logger.warning("Failed to create slash commands")
+            logger.warning("Failed to copy slash commands")
             
         await send_project_init_webhook(
-            webhook_url, task_id, "create_slash_commands",
-            "Slash commands created successfully",
+            webhook_url, task_id, "copy_slash_commands",
+            "SuperClaude slash commands enabled" if slash_commands_success else "Failed to copy slash commands",
             ProjectInitStatus.IN_PROGRESS
         )
         
@@ -221,31 +221,31 @@ async def init_project_background(
         
         # Step 9: Run default MCP commands
         mcp_results = []
-        if mcp_servers:
-            await send_project_init_webhook(
-                webhook_url, task_id, "mcp_initialization",
-                "Running default MCP server commands...",
-                ProjectInitStatus.IN_PROGRESS
-            )
+        # if mcp_servers:
+        #     await send_project_init_webhook(
+        #         webhook_url, task_id, "mcp_initialization",
+        #         "Running default MCP server commands...",
+        #         ProjectInitStatus.IN_PROGRESS
+        #     )
             
-            mcp_config_path = project_path / "mcp-servers.json"
-            if mcp_config_path.exists():
-                with open(mcp_config_path, "r") as f:
-                    full_mcp_config = json.load(f)
-                    full_mcp_servers = full_mcp_config.get("mcpServers", {})
+            # mcp_config_path = project_path / "mcp-servers.json"
+            # if mcp_config_path.exists():
+            #     with open(mcp_config_path, "r") as f:
+            #         full_mcp_config = json.load(f)
+            #         full_mcp_servers = full_mcp_config.get("mcpServers", {})
                     
-                mcp_results = await run_default_mcp_commands(
-                    project_path, 
-                    full_mcp_servers,
-                    webhook_url
-                )
+            #     mcp_results = await run_default_mcp_commands(
+            #         project_path, 
+            #         full_mcp_servers,
+            #         webhook_url
+            #     )
                 
-            await send_project_init_webhook(
-                webhook_url, task_id, "mcp_initialization",
-                f"MCP initialization completed: {len([r for r in mcp_results if r.get('success')])} succeeded",
-                ProjectInitStatus.IN_PROGRESS,
-                metadata={"mcp_results": mcp_results}
-            )
+            # await send_project_init_webhook(
+            #     webhook_url, task_id, "mcp_initialization",
+            #     f"MCP initialization completed: {len([r for r in mcp_results if r.get('success')])} succeeded",
+            #     ProjectInitStatus.IN_PROGRESS,
+            #     metadata={"mcp_results": mcp_results}
+            # )
         
         # Final success webhook
         await send_project_init_webhook(
@@ -260,7 +260,7 @@ async def init_project_background(
                 "setup_results": {
                     "mcp_approval_copied": copy_success,
                     "claude_directory_setup": claude_setup_success,
-                    "slash_commands_created": slash_commands_success,
+                    "slash_commands_copied": slash_commands_success,
                     "branch_checkout_success": branch_result["success"],
                     "ai_files_copied": ai_files_result["files_copied"],
                     "claude_init_success": claude_init_result["success"],
