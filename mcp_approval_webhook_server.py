@@ -17,19 +17,15 @@ import aiohttp
 from aiohttp import web
 import threading
 
-# Add the parent directory to sys.path to import app.config
-sys.path.append(str(Path(__file__).parent))
-from app.config import settings
-
 # Create MCP server
 mcp = FastMCP("approval-server")
 
 # Configuration from settings
-WEBHOOK_URL = settings.approval_webhook_url
-CALLBACK_HOST = settings.approval_callback_host
+WEBHOOK_URL = "http://localhost:8002/approval-request"
+CALLBACK_HOST = "localhost"
 # Use a dynamic port based on process ID to avoid conflicts
-CALLBACK_PORT = settings.approval_callback_port_base + (os.getpid() % 1000)
-APPROVAL_TIMEOUT = settings.approval_timeout
+CALLBACK_PORT = 8083
+APPROVAL_TIMEOUT = 300 # 5 minutes
 
 # Store pending approvals
 pending_approvals: Dict[str, dict] = {}
