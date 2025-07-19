@@ -66,7 +66,32 @@
             position: relative;
         }
         
-
+        /* ===== GLOBAL SCROLLBAR HIDING ===== */
+        /* Hide scrollbars for all textareas and scrollable containers */
+        textarea {
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        
+        textarea::-webkit-scrollbar {
+            display: none; /* Chrome, Safari and Opera */
+        }
+        
+        /* Hide scrollbars for any element with custom scrolling */
+        .scrollable, 
+        *[style*="overflow-y: auto"], 
+        *[style*="overflow-x: auto"],
+        *[style*="overflow: auto"] {
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        
+        .scrollable::-webkit-scrollbar,
+        *[style*="overflow-y: auto"]::-webkit-scrollbar,
+        *[style*="overflow-x: auto"]::-webkit-scrollbar,
+        *[style*="overflow: auto"]::-webkit-scrollbar {
+            display: none; /* Chrome, Safari and Opera */
+        }
         
         /* Greeting Header Styles */
         .greeting-header {
@@ -188,7 +213,7 @@
         .new-session-input {
             display: flex;
             gap: 10px;
-            align-items: stretch;
+            align-items: center; /* Changed from stretch to center for better alignment */
             margin-top: 20px;
         }
         
@@ -212,6 +237,14 @@
             overflow-y: auto;
             overflow-x: hidden;
             line-height: 1.5;
+            /* Hide scrollbars */
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        .new-session-input textarea::-webkit-scrollbar {
+            display: none;
         }
         
         .new-session-input textarea::placeholder {
@@ -297,6 +330,11 @@
             cursor: pointer;
             transition: all 0.2s;
             letter-spacing: -0.28px;
+            height: 39px; /* Match textarea min-height */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            white-space: nowrap;
         }
         
         .btn-success:hover {
@@ -513,7 +551,7 @@
         .card-input-wrapper {
             display: flex;
             gap: 10px;
-            align-items: flex-end;
+            align-items: center; /* Changed from flex-end to center for better alignment */
         }
         
         .card-input-wrapper textarea {
@@ -531,6 +569,14 @@
             overflow-y: auto;
             overflow-x: hidden;
             line-height: 1.5;
+            /* Hide scrollbars */
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        .card-input-wrapper textarea::-webkit-scrollbar {
+            display: none;
         }
         
         .card-input-wrapper button {
@@ -544,6 +590,10 @@
             font-weight: 500;
             cursor: pointer;
             white-space: nowrap;
+            height: 40px; /* Fixed height to match textarea min-height */
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         .card-input-wrapper button:hover {
