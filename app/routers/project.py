@@ -20,6 +20,7 @@ from app.services.project_utils import (
     run_claude_init_with_query_processor,
     run_default_mcp_commands,
     setup_claude_directory,
+    update_gitignore,
 )
 from app.services.webhook_utils import send_project_init_webhook
 
@@ -96,6 +97,13 @@ async def init_project_background(
             ProjectInitStatus.IN_PROGRESS
         )
         
+        # Step 2.5: Update .gitignore to exclude .claude directory
+        gitignore_result = update_gitignore(project_path)
+        if not gitignore_result:
+            logger.warning("Failed to update .gitignore, continuing...")
+        else:
+            logger.info("Updated .gitignore to exclude .claude directory")
+        
         # Step 3: Checkout new branch
         await send_project_init_webhook(
             webhook_url, task_id, "checkout_branch",
@@ -120,30 +128,7 @@ async def init_project_background(
                 metadata={"branch_creation_failed": True, "error": branch_result.get('error')}
             )
         
-        # Step 4: Setup MCP servers
-        await send_project_init_webhook(
-            webhook_url, task_id, "setup_mcp",
-            "Setting up MCP servers configuration...",
-            ProjectInitStatus.IN_PROGRESS
-        )
-        
-        mcp_servers = request.mcp_servers or []
-        approval_server_path = Path(__file__).parent.parent.parent / "mcp_approval_webhook_server.py"
-        
-        create_mcp_config_for_project(project_path, mcp_servers, Path("mcp_approval_webhook_server.py"))
-        
-        copy_success = copy_mcp_approval_server(project_path, approval_server_path)
-        if not copy_success:
-            logger.warning("Failed to copy MCP approval server, continuing...")
-            
-        await send_project_init_webhook(
-            webhook_url, task_id, "setup_mcp",
-            f"MCP configuration created with {len(mcp_servers)} servers",
-            ProjectInitStatus.IN_PROGRESS,
-            metadata={"mcp_servers": [s.server_type.value for s in mcp_servers]}
-        )
-        
-        # Step 4: Setup .claude directory
+        # Step 4: Setup .claude directory (moved from Step 5)
         await send_project_init_webhook(
             webhook_url, task_id, "setup_claude_directory",
             "Setting up .claude directory with hooks and settings...",
@@ -158,6 +143,29 @@ async def init_project_background(
             webhook_url, task_id, "setup_claude_directory",
             ".claude directory setup completed",
             ProjectInitStatus.IN_PROGRESS
+        )
+        
+        # Step 5: Setup MCP servers (moved from Step 4)
+        await send_project_init_webhook(
+            webhook_url, task_id, "setup_mcp",
+            "Setting up MCP servers configuration...",
+            ProjectInitStatus.IN_PROGRESS
+        )
+        
+        mcp_servers = request.mcp_servers or []
+        approval_server_path = Path(__file__).parent.parent.parent / "mcp_approval_webhook_server.py"
+        
+        create_mcp_config_for_project(project_path, mcp_servers, approval_server_path)
+        
+        copy_success = copy_mcp_approval_server(project_path, approval_server_path)
+        if not copy_success:
+            logger.warning("Failed to copy MCP approval server, continuing...")
+            
+        await send_project_init_webhook(
+            webhook_url, task_id, "setup_mcp",
+            f"MCP configuration created with {len(mcp_servers)} servers",
+            ProjectInitStatus.IN_PROGRESS,
+            metadata={"mcp_servers": [s.server_type.value for s in mcp_servers]}
         )
         
         # Step 6: Create slash commands
@@ -194,22 +202,22 @@ async def init_project_background(
         )
         
         # Step 8: Run Claude /init command
-        await send_project_init_webhook(
-            webhook_url, task_id, "claude_init",
-            "Running Claude /init command...",
-            ProjectInitStatus.IN_PROGRESS
-        )
+        # await send_project_init_webhook(
+        #     webhook_url, task_id, "claude_init",
+        #     "Running Claude /init command...",
+        #     ProjectInitStatus.IN_PROGRESS
+        # )
         
-        claude_init_result = await run_claude_init_with_query_processor(
-            project_path, task_id, webhook_url
-        )
+        # claude_init_result = await run_claude_init_with_query_processor(
+        #     project_path, task_id, webhook_url
+        # )
         
-        await send_project_init_webhook(
-            webhook_url, task_id, "claude_init",
-            "Claude /init command completed" if claude_init_result["success"] else "Claude /init command failed",
-            ProjectInitStatus.IN_PROGRESS,
-            metadata=claude_init_result
-        )
+        # await send_project_init_webhook(
+        #     webhook_url, task_id, "claude_init",
+        #     "Claude /init command completed" if claude_init_result["success"] else "Claude /init command failed",
+        #     ProjectInitStatus.IN_PROGRESS,
+        #     metadata=claude_init_result
+        # )
         
         # Step 9: Run default MCP commands
         mcp_results = []
@@ -255,7 +263,7 @@ async def init_project_background(
                     "slash_commands_created": slash_commands_success,
                     "branch_checkout_success": branch_result["success"],
                     "ai_files_copied": ai_files_result["files_copied"],
-                    "claude_init_success": claude_init_result["success"],
+                    # "claude_init_success": claude_init_result["success"],
                 },
                 # "mcp_initialization_results": mcp_results
             }

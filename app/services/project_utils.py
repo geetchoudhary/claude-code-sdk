@@ -383,6 +383,48 @@ def clone_repository(repo_url: str, target_path: Path) -> subprocess.CompletedPr
     return subprocess.run(clone_cmd, capture_output=True, text=True)
 
 
+def update_gitignore(project_path: Path) -> bool:
+    """Update or create .gitignore to exclude .claude directory.
+    
+    Args:
+        project_path: Project directory path
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        gitignore_path = project_path / ".gitignore"
+        claude_entry = ".claude/"
+        
+        if gitignore_path.exists():
+            # Read existing .gitignore
+            with open(gitignore_path, "r") as f:
+                content = f.read()
+            
+            # Check if .claude is already in .gitignore
+            lines = content.splitlines()
+            if claude_entry not in lines and ".claude" not in lines:
+                # Append .claude/ to existing .gitignore
+                with open(gitignore_path, "a") as f:
+                    # Add newline if file doesn't end with one
+                    if content and not content.endswith('\n'):
+                        f.write('\n')
+                    f.write(f"{claude_entry}\n")
+                logger.info(f"Added {claude_entry} to existing .gitignore")
+            else:
+                logger.info(f"{claude_entry} already exists in .gitignore")
+        else:
+            # Create new .gitignore with .claude/
+            with open(gitignore_path, "w") as f:
+                f.write(f"{claude_entry}\n")
+            logger.info(f"Created .gitignore with {claude_entry}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update .gitignore: {e}")
+        return False
+
+
 def create_git_branch(project_path: Path, branch_name: str) -> subprocess.CompletedProcess:
     """Create and checkout a new git branch."""
     branch_cmd = ["git", "checkout", "-b", branch_name]
@@ -444,10 +486,10 @@ def create_mcp_config_for_project(
     
     mcp_config = {
         "mcpServers": {
-            # Always include approval server
+            # Always include approval server from .claude directory
             "approval-server": {
                 "command": "python",
-                "args": [str(approval_server_path)],
+                "args": [".claude/mcp_approval_webhook_server.py"],
             }
         }
     }
@@ -509,13 +551,15 @@ def create_mcp_config_for_project(
                 # Add to config using the enum value as key
                 mcp_config["mcpServers"][server_type.value] = server_dict
 
-    # Write mcp-servers.json to project directory
-    mcp_config_path = project_path / "mcp-servers.json"
+    # Write mcp-servers.json to .claude directory
+    claude_dir = project_path / ".claude"
+    claude_dir.mkdir(exist_ok=True)
+    mcp_config_path = claude_dir / "mcp-servers.json"
     with open(mcp_config_path, "w") as f:
         json.dump(mcp_config, f, indent=2)
 
     logger.info(
-        f"Created mcp-servers.json with {len(mcp_servers)} servers (plus approval server)"
+        f"Created .claude/mcp-servers.json with {len(mcp_servers)} servers (plus approval server)"
     )
 
 
@@ -534,7 +578,10 @@ def copy_mcp_approval_server(project_path: Path, source_path: Path) -> bool:
             logger.error(f"MCP approval server not found at {source_path}")
             return False
             
-        target_path = project_path / "mcp_approval_webhook_server.py"
+        # Copy to .claude directory
+        claude_dir = project_path / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        target_path = claude_dir / "mcp_approval_webhook_server.py"
         import shutil
         shutil.copy2(source_path, target_path)
         
@@ -876,13 +923,13 @@ def copy_default_ai_files(project_path: Path) -> Dict[str, Any]:
         resources_dir = Path(__file__).parent.parent.parent / "resources"
         
         # Create resources directory in the project if it doesn't exist
-        project_resources_dir = project_path / "resources"
+        project_resources_dir = project_path / ".claude" / "resources"
         project_resources_dir.mkdir(exist_ok=True)
         logger.info(f"Created resources directory at {project_resources_dir}")
         
         for filename in ai_instruction_files:
             source_file = resources_dir / filename
-            dest_file = project_path / "resources" / filename
+            dest_file = project_path / ".claude" / "resources" / filename
             
             try:
                 if source_file.exists():

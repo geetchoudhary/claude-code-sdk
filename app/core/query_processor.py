@@ -363,7 +363,7 @@ class ClaudeQueryProcessor:
             try:
                 from pathlib import Path
                 project_dir = Path(options["cwd"])
-                mcp_config_file = project_dir / "mcp-servers.json"
+                mcp_config_file = project_dir / ".claude" / "mcp-servers.json"
                 
                 if mcp_config_file.exists():
                     import json

@@ -52,7 +52,7 @@ DANGEROUS_COMMANDS = [
 
 def log_to_file(message):
     """Log to file for audit trail"""
-    with open("permission_decisions.log", "a") as f:
+    with open(".claude/permission_decisions.log", "a") as f:
         f.write(f"{datetime.datetime.now()} - {message}\n")
 
 def matches_pattern(file_path: str, pattern: str) -> bool:
