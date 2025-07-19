@@ -497,9 +497,17 @@
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
         
-        /* Input section - removed from cards */
+        /* Input section for active card */
         .card-input-section {
-            display: none !important; /* Hide all card inputs */
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            padding: 15px;
+            margin-top: 15px;
+            display: none;
+        }
+        
+        .message-card-wrapper.active .card-input-section {
+            display: block;
         }
         
         .card-input-wrapper {
@@ -1104,8 +1112,23 @@
             const status = msg.status || 'unknown';
             const isLatestMessage = index === conversationMessages.length - 1;
             
-            // No input section in cards anymore
-            const inputSection = '';
+            // Add input section only to the latest message card
+            const inputSection = isLatestMessage ? `
+                <div class="card-input-section">
+                    <div class="card-input-wrapper">
+                        <textarea 
+                            id="card-input-${sessionId}-${index}" 
+                            placeholder="${getDynamicPlaceholder(msg, conversationMessages)}"
+                            rows="1"
+                            onkeydown="handleCardKeyDown(event, '${sessionId}')"
+                            oninput="autoResizeTextarea(this)"
+                        ></textarea>
+                        <button onclick="sendQueryFromCard('${sessionId}')">
+                            Send
+                        </button>
+                    </div>
+                </div>
+            ` : '';
             
             const cardContent = renderMessageWithInput(msg, conversationMessages, inputSection);
             
@@ -1845,140 +1868,6 @@
                 pollMessages();
             }
         });
-        
-        // Global input handling
-        function handleGlobalKeyDown(event) {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                sendGlobalMessage();
-            }
-        }
-        
-        async function sendGlobalMessage() {
-            const input = document.getElementById('globalInput');
-            const prompt = input ? input.value.trim() : '';
-            
-            if (!prompt) {
-                showNotification('Please enter a message', 'error');
-                return;
-            }
-            
-            // Get the latest session ID or create new one
-            const sessionIds = Object.keys(messagesBySession);
-            let targetSessionId = null;
-            let targetConversationId = null;
-            
-            if (sessionIds.length > 0) {
-                // Use the most recent session
-                const sortedSessions = sessionIds.sort((a, b) => {
-                    const aMessages = messagesBySession[a];
-                    const bMessages = messagesBySession[b];
-                    const aTime = new Date(aMessages[aMessages.length - 1].timestamp);
-                    const bTime = new Date(bMessages[bMessages.length - 1].timestamp);
-                    return bTime - aTime;
-                });
-                
-                targetSessionId = sortedSessions[0];
-                const messages = messagesBySession[targetSessionId];
-                const lastMessage = messages[messages.length - 1];
-                targetConversationId = lastMessage.session_id || lastMessage.conversation_id;
-            } else {
-                // Create new session
-                targetConversationId = 'session-' + Date.now();
-            }
-            
-            const permissionMode = sessionPermissionModes[targetSessionId] || 
-                                 document.getElementById('permissionMode').value;
-            
-            try {
-                const response = await fetch(`${API_URL}/query`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        prompt: prompt,
-                        conversation_id: targetConversationId,
-                        options: { permission_mode: permissionMode }
-                    })
-                });
-                
-                if (response.ok) {
-                    input.value = '';
-                    input.style.height = '40px'; // Reset height
-                    showNotification('Query sent', 'success');
-                    
-                    // Track message sent
-                    trackEvent('message_sent', {
-                        conversation_id: targetConversationId,
-                        permission_mode: permissionMode,
-                        message_length: prompt.length,
-                        source: 'global_input'
-                    });
-                    
-                    // Scroll to top after sending message
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                } else {
-                    throw new Error('Failed to send query');
-                }
-                
-            } catch (error) {
-                console.error('Error sending query:', error);
-                showNotification('Failed to send message', 'error');
-            }
-        }
-        
-        // Update fixed input placeholder based on context
-        function updateGlobalInputPlaceholder() {
-            const input = document.getElementById('globalInput');
-            if (!input) return;
-            
-            const sessionIds = Object.keys(messagesBySession);
-            if (sessionIds.length === 0) {
-                input.placeholder = "What are you building?";
-                return;
-            }
-            
-            // Get most recent session
-            const sortedSessions = sessionIds.sort((a, b) => {
-                const aMessages = messagesBySession[a];
-                const bMessages = messagesBySession[b];
-                const aTime = new Date(aMessages[aMessages.length - 1].timestamp);
-                const bTime = new Date(bMessages[bMessages.length - 1].timestamp);
-                return bTime - aTime;
-            });
-            
-            const latestSession = messagesBySession[sortedSessions[0]];
-            const filteredMessages = latestSession.filter(msg => 
-                msg.message_type !== 'claude_processing' && msg.status !== 'processing'
-            );
-            
-            if (filteredMessages.length > 0) {
-                const latestMessage = filteredMessages[filteredMessages.length - 1];
-                input.placeholder = getDynamicPlaceholder(latestMessage, filteredMessages);
-            }
-        }
-        
-        // Call this when messages update
-        const originalRenderSessions = renderSessions;
-        renderSessions = function() {
-            originalRenderSessions();
-            updateGlobalInputPlaceholder();
-        };
     </script>
-    
-    <!-- Fixed Input Container -->
-    <div class="fixed-input-container" id="fixedInputContainer">
-        <div class="fixed-input-wrapper">
-            <textarea 
-                id="globalInput" 
-                placeholder="Type your message..."
-                rows="1"
-                oninput="autoResizeTextarea(this)"
-                onkeydown="handleGlobalKeyDown(event)"
-            ></textarea>
-            <button onclick="sendGlobalMessage()">
-                Send
-            </button>
-        </div>
-    </div>
 </body>
 </html>
