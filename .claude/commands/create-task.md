@@ -43,7 +43,7 @@ When you run this command, I'll first analyze your project to understand:
 
 ## Phase 2: Interactive Questions
 
-I'll ask you these questions to understand your specific needs:
+I'll ask you these questions sequentially to understand your specific needs:
 
 ### Question 1: What are you building?
 **What I need:** Component/feature name and brief description  

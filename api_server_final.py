@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-PROJECT_ROOT = "/Users/mastergeet/Repos/claude_test"
+PROJECT_ROOT = "/Users/biswa/Desktop/claude-code-sdk"
 
 class QueryRequest(BaseModel):
     prompt: str
